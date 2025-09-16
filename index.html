@@ -1,203 +1,246 @@
-<!doctype html>
-<html lang="id">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Hand Gesture Voice — Final</title>
-
-<!-- MediaPipe CDN libs -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-
-<style>
-  :root{
-    --bg:#071226; --card:#0c1624; --muted:#9fb0c3; --accent:#06b6d4;
-    --glass: rgba(255,255,255,0.03);
-  }
-  *{box-sizing:border-box;}
-  body{margin:0; min-height:100vh; background:linear-gradient(180deg,var(--bg),#041423); color:#e6f0f5; font-family:Inter,system-ui,Helvetica,Arial; display:flex; justify-content:center; padding:20px;}
-  .wrap{width:100%; max-width:1100px; display:grid; grid-template-columns:680px 1fr; gap:18px;}
-  .card{background:var(--card); border-radius:12px; padding:12px; box-shadow: 0 8px 30px rgba(2,8,23,0.6); border:1px solid rgba(255,255,255,0.02);}
-  .video-box{position:relative; width:100%; height:480px; border-radius:10px; overflow:hidden; background:#000;}
-  #video{width:100%; height:100%; object-fit:cover; transform:scaleX(-1);}
-  #canvas{position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; transform:scaleX(-1);}
-  .controls{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
-  button{padding:8px 12px; border-radius:8px; border:none; cursor:pointer; background:var(--glass); color:var(--muted);}
-  button.primary{background:linear-gradient(90deg,var(--accent),#7dd3fc22); color:#021018; font-weight:700;}
-  input, select {padding:8px; border-radius:8px; border:1px solid rgba(255,255,255,0.04); background:transparent; color:inherit;}
-  label{font-size:13px; color:var(--muted);}
-  .small{font-size:13px; color:var(--muted);}
-  .list{display:flex; flex-direction:column; gap:10px;}
-  .gesture-item{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px; border-radius:8px; background:linear-gradient(180deg,#071a23,#06202b); border:1px solid rgba(255,255,255,0.02);}
-  .gesture-left{display:flex; gap:8px; align-items:center;}
-  .badge{font-size:12px; color:var(--muted);}
-  .bubble-area{position:relative; min-height:60px;}
-  .bubble{position:absolute; right:10px; top:10px; background:#0ea5a9; color:#021018; padding:10px 14px; border-radius:16px; box-shadow:0 6px 18px rgba(0,0,0,0.4); animation:pop .28s ease;}
-  @keyframes pop{from{transform:translateY(6px) scale(.98);opacity:0} to{transform:translateY(0) scale(1);opacity:1}}
-  .muted-box{background:#071826;border-radius:8px;padding:8px;border:1px solid rgba(255,255,255,0.02);}
-  .footer-note{font-size:12px;color:var(--muted); margin-top:8px;}
-  .highlight{box-shadow:0 0 18px rgba(6,182,212,0.18); border:1px solid rgba(6,182,212,0.12);}
-  .row{display:flex; gap:8px; align-items:center;}
-  .flex-col{display:flex;flex-direction:column;gap:8px;}
-  .tiny{font-size:12px;color:var(--muted);}
-  .handLabel{font-size:12px;padding:6px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.02);color:var(--muted);}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hand & Face AI Bot</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      background: linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+    h1 {
+      margin: 10px 0;
+      font-size: 24px;
+      text-align: center;
+    }
+    #video {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: -1;
+    }
+    .card {
+      background: rgba(0,0,0,0.5);
+      border-radius: 15px;
+      padding: 15px;
+      margin: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+      max-width: 90%;
+    }
+    #chat {
+      flex: 1;
+      width: 100%;
+      max-width: 600px;
+      overflow-y: auto;
+    }
+    .bubble {
+      margin: 5px 0;
+      padding: 10px 15px;
+      border-radius: 20px;
+      max-width: 75%;
+      animation: fadeIn 0.3s ease;
+    }
+    .bot { background: #1e90ff; align-self: flex-start; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
+    #gesturesList {
+      list-style: none;
+      padding: 0;
+    }
+    #gesturesList li {
+      background: rgba(255,255,255,0.1);
+      margin: 5px 0;
+      padding: 8px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+  </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <div class="video-box" id="videoWrap">
-        <video id="video" autoplay playsinline></video>
-        <canvas id="canvas"></canvas>
-      </div>
+  <h1>🤖 Hand & Face AI Bot</h1>
+  <video id="video" autoplay muted playsinline></video>
 
-      <div class="controls">
-        <button id="btnCamera" class="primary">Start Camera</button>
-        <button id="btnFullscreen">🖥️ Fullscreen Kamera</button>
-        <button id="btnRecord">🎥 Rekam Gestur</button>
-        <button id="btnStopRecord">⏹️ Stop Rekam</button>
-        <button id="btnAutoName">🔀 Auto-Name</button>
-        <button id="btnSnapshot">📸 Snapshot</button>
-        <a id="downloadLink" style="display:none"></a>
-      </div>
-
-      <div style="display:flex;gap:12px;margin-top:12px;align-items:center;">
-        <div style="flex:1;">
-          <label class="small">Nama Gestur</label><br>
-          <input id="gestureName" placeholder="kosongkan untuk auto-name" style="width:100%;">
-        </div>
-        <div style="flex:1;">
-          <label class="small">Respon Suara</label><br>
-          <input id="gestureResponse" placeholder="Contoh: Halo!" style="width:100%;">
-        </div>
-        <div style="width:140px;">
-          <label class="small">Cooldown (ms)</label><br>
-          <input id="gestureCooldown" type="number" value="2500" style="width:100%;">
-        </div>
-      </div>
-
-      <div style="display:flex;gap:12px;margin-top:8px;align-items:center;">
-        <div style="flex:1;">
-          <label class="small">Sensitivity (threshold)</label>
-          <input id="sensitivity" type="range" min="0.8" max="5.0" step="0.1" value="3.0" style="width:100%;">
-          <div class="tiny">Nilai lebih kecil = lebih ketat (lebih sulit cocok). Saat ini: <span id="sVal">3.0</span></div>
-        </div>
-        <div style="width:160px;">
-          <label class="small">Global cooldown (ms)</label><br>
-          <input id="globalCooldown" type="number" value="500" style="width:100%;">
-        </div>
-      </div>
-
-      <div class="muted-box" style="margin-top:12px;">
-        <div id="status" class="small">Status: menunggu kamera...</div>
-        <div class="footer-note">Tips: tahan tombol <b>Rekam Gestur</b> selama ~1 detik untuk merekam beberapa frame. Setelah tersimpan, tunjukkan gestur untuk memicu respon suara. Kamera & FaceMesh berjalan bersamaan.</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h3 style="margin:0">Daftar Gestur & Ekspresi</h3>
-        <div style="display:flex;gap:8px;">
-          <button id="exportBtn">⬇️ Export</button>
-          <input type="file" id="importFile" style="display:none"/>
-          <button id="importBtn">⬆️ Import</button>
-          <button id="clearBtn">🗑️ Clear All</button>
-        </div>
-      </div>
-
-      <div id="gesturesList" class="list" style="margin-top:10px;max-height:320px;overflow:auto;"></div>
-
-      <div style="margin-top:12px;">
-        <div class="bubble-area" id="bubbleArea"></div>
-      </div>
-
-      <div style="margin-top:12px;" class="flex-col">
-        <div class="row">
-          <button id="saveBtn" class="primary">💾 Simpan Gestur</button>
-          <button id="applySettings">Apply Settings</button>
-        </div>
-        <div class="small">Export/Import menyimpan seluruh template gesture (JSON). Simpan gesture sebelum export. Face expression auto diaktifkan — ada setting cooldown wajah di bawah.</div>
-        <div style="margin-top:8px;">
-          <label class="small">Face cooldown (ms)</label>
-          <input id="faceCooldown" type="number" value="3000" style="width:120px;">
-        </div>
-      </div>
+  <div class="card">
+    <div class="controls">
+      <label class="toggle"><input type="checkbox" id="toggleHand" checked> Hand Gestures</label>
+      <label class="toggle"><input type="checkbox" id="toggleFace" checked> Face Expressions</label>
+      <label class="toggle"><input type="checkbox" id="toggleVoice" checked> Voice Response</label>
     </div>
   </div>
 
+  <div class="card" style="flex:1;width:100%;max-width:600px;display:flex;flex-direction:column;">
+    <div id="chat"></div>
+  </div>
+
+  <div class="card">
+    <h3>Gestures</h3>
+    <form id="gestureForm">
+      <input type="text" id="gestureName" placeholder="Gesture name" required>
+      <input type="text" id="gestureResponse" placeholder="Bot response" required>
+      <button type="submit">Add Gesture</button>
+    </form>
+    <ul id="gesturesList"></ul>
+  </div>
+
 <script>
-/* ====== DOM & State ====== */
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const btnCamera = document.getElementById('btnCamera');
-const btnFullscreen = document.getElementById('btnFullscreen');
-const btnRecord = document.getElementById('btnRecord');
-const btnStopRecord = document.getElementById('btnStopRecord');
-const btnAutoName = document.getElementById('btnAutoName');
-const btnSnapshot = document.getElementById('btnSnapshot');
-const downloadLink = document.getElementById('downloadLink');
+  const video = document.getElementById("video");
+  const chat = document.getElementById("chat");
+  const gesturesList = document.getElementById("gesturesList");
 
-const gestureNameInput = document.getElementById('gestureName');
-const gestureResponseInput = document.getElementById('gestureResponse');
-const gestureCooldownInput = document.getElementById('gestureCooldown');
-const sensitivityRange = document.getElementById('sensitivity');
-const sVal = document.getElementById('sVal');
-const globalCooldownInput = document.getElementById('globalCooldown');
-const statusEl = document.getElementById('status');
-const gesturesListEl = document.getElementById('gesturesList');
-const bubbleArea = document.getElementById('bubbleArea');
-const saveBtn = document.getElementById('saveBtn');
-const exportBtn = document.getElementById('exportBtn');
-const importBtn = document.getElementById('importBtn');
-const importFile = document.getElementById('importFile');
-const clearBtn = document.getElementById('clearBtn');
-const applySettingsBtn = document.getElementById('applySettings');
-const faceCooldownInput = document.getElementById('faceCooldown');
+  // toggle switches
+  const toggleHand = document.getElementById("toggleHand");
+  const toggleFace = document.getElementById("toggleFace");
+  const toggleVoice = document.getElementById("toggleVoice");
 
-let cameraObj = null;
-let recording = false;
-let recordFrames = [];
-const RECORD_FRAME_COUNT = 18;
-let templates = []; // template objects {id,name,response,cooldown,landmarks,lastTriggered}
-let lastGlobalTrigger = 0;
-let lastFaceTrigger = 0;
+  let gestures = [
+    {name: "open", response: "Halo!"},
+    {name: "one", response: "Kalp"},
+    {name: "two", response: "Nama"},
+    {name: "thumbs_up", response: "Bagus!"}
+  ];
+  let cooldown = false;
 
-/* ====== UI Small hookups ====== */
-sensitivityRange.addEventListener('input', ()=> sVal.innerText = sensitivityRange.value );
+  function addMessage(text) {
+    const div = document.createElement("div");
+    div.className = "bubble bot";
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
 
-/* ====== Speech & bubble ====== */
-function speak(text){
-  const now = Date.now();
-  const globalCd = parseInt(globalCooldownInput.value)||500;
-  if(now - lastGlobalTrigger < globalCd) return;
-  lastGlobalTrigger = now;
+  function speak(text) {
+    if (!toggleVoice.checked) return;
+    const utter = new SpeechSynthesisUtterance(text);
+    speechSynthesis.speak(utter);
+  }
 
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "id-ID";
-  speechSynthesis.cancel(); // reduce overlaps
-  speechSynthesis.speak(utter);
-  showBubble(text);
-}
-function showBubble(text){
-  bubbleArea.innerHTML = `<div class="bubble">🤖 ${escapeHtml(text)}</div>`;
-  setTimeout(()=>{ bubbleArea.innerHTML=''; }, 3000);
-}
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>'&#'+c.charCodeAt(0)+';'); }
+  function triggerResponse(text) {
+    if (cooldown) return;
+    addMessage(text);
+    speak(text);
+    cooldown = true;
+    setTimeout(()=>cooldown=false, 2000);
+  }
 
-/* ====== Normalization & comparison ====== */
-function normalizeLandmarks(raw){
-  const ref = raw[0];
-  const pts = raw.map(p => ({x: p.x - ref.x, y: p.y - ref.y}));
-  let maxd = 1e-6;
-  for(const p of pts){ const d = Math.hypot(p.x,p.y); if(d>maxd) maxd = d; }
-  return pts.map(p => ({x: p.x / maxd, y: p.y / maxd}));
-}
-function averageFrames(frames){
-  if(frames.length===0) return null;
-  const sum = Array(21).fill(0).map(()=>({x:0,y:0}));
+  // Gestures UI
+  function renderGestures() {
+    gesturesList.innerHTML = "";
+    gestures.forEach((g,i)=>{
+      const li = document.createElement("li");
+      li.textContent = g.name + " → " + g.response;
+      gesturesList.appendChild(li);
+    });
+  }
+  renderGestures();
+
+  document.getElementById("gestureForm").addEventListener("submit", e=>{
+    e.preventDefault();
+    const name = document.getElementById("gestureName").value;
+    const res = document.getElementById("gestureResponse").value;
+    gestures.push({name, response: res});
+    renderGestures();
+    e.target.reset();
+  });
+
+  // MediaPipe Hands
+  const hands = new Hands({locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  hands.setOptions({maxNumHands: 2, minDetectionConfidence:0.7, minTrackingConfidence:0.7});
+  hands.onResults(results=>{
+    if (!toggleHand.checked) return;
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length>0) {
+      let g = gestures.find(g=>g.name==="open");
+      if (g) triggerResponse(g.response);
+    }
+  });
+
+  // FaceMesh dengan jeda anti-kedip
+  let lastFaceTrigger = 0;
+  let eyeClosedSince = null;
+  const FACE_SLEEP_THRESHOLD = 0.018; // relatif
+  const YAWN_THRESHOLD = 0.05;
+
+  function getMetric(face){
+    const leftEye = Math.abs(face[159].y - face[145].y);
+    const rightEye = Math.abs(face[386].y - face[374].y);
+    const mouth = Math.abs(face[13].y - face[14].y);
+    return {leftEye,rightEye,mouth};
+  }
+
+  const faceMesh = new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  faceMesh.setOptions({minDetectionConfidence:0.7, minTrackingConfidence:0.7});
+  faceMesh.onResults(results=>{
+    if (!toggleFace.checked) return;
+    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length>0) {
+      const face = results.multiFaceLandmarks[0];
+      const m = getMetric(face);
+      const now = Date.now();
+      const cd = 3000;
+
+      // yawn
+      if (m.mouth > YAWN_THRESHOLD) {
+        if (now - lastFaceTrigger > cd){
+          lastFaceTrigger = now;
+          triggerResponse("Kamu kelihatan menguap, istirahat dulu ya");
+        }
+        eyeClosedSince = null;
+        return;
+      }
+
+      // sleep detection (mata tertutup >1.5s)
+      if (m.leftEye < FACE_SLEEP_THRESHOLD && m.rightEye < FACE_SLEEP_THRESHOLD){
+        if (!eyeClosedSince) eyeClosedSince = now;
+        else if (now - eyeClosedSince > 1500){
+          if (now - lastFaceTrigger > cd){
+            lastFaceTrigger = now;
+            triggerResponse("Kamu mengantuk, jangan dipaksa ya");
+          }
+        }
+        return;
+      } else {
+        eyeClosedSince = null;
+      }
+    }
+  });
+
+  const camera = new Camera(video,{
+    onFrame: async ()=>{
+      await hands.send({image: video});
+      await faceMesh.send({image: video});
+    },
+    width:1280, height:720
+  });
+  camera.start();
+</script>
+</body>
+</html>
+ap(()=>({x:0,y:0}));
   frames.forEach(f=>{ for(let i=0;i<21;i++){ sum[i].x += f[i].x; sum[i].y += f[i].y; } });
   const n = frames.length;
   return sum.map(p=>({x:p.x/n, y:p.y/n}));
