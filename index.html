@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Hand Gesture Voice — Stable Full</title>
+<title>Hand Gesture Voice — Final</title>
 
 <!-- MediaPipe CDN libs -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
@@ -17,7 +17,7 @@
     --glass: rgba(255,255,255,0.03);
   }
   *{box-sizing:border-box;}
-  body{margin:0; min-height:100vh; background:linear-gradient(180deg,var(--bg),#041423); color:#e6edf3; font-family:Inter,system-ui,Helvetica,Arial; display:flex; justify-content:center; padding:20px;}
+  body{margin:0; min-height:100vh; background:linear-gradient(180deg,var(--bg),#041423); color:#e6f0f5; font-family:Inter,system-ui,Helvetica,Arial; display:flex; justify-content:center; padding:20px;}
   .wrap{width:100%; max-width:1100px; display:grid; grid-template-columns:680px 1fr; gap:18px;}
   .card{background:var(--card); border-radius:12px; padding:12px; box-shadow: 0 8px 30px rgba(2,8,23,0.6); border:1px solid rgba(255,255,255,0.02);}
   .video-box{position:relative; width:100%; height:480px; border-radius:10px; overflow:hidden; background:#000;}
@@ -34,7 +34,7 @@
   .gesture-left{display:flex; gap:8px; align-items:center;}
   .badge{font-size:12px; color:var(--muted);}
   .bubble-area{position:relative; min-height:60px;}
-  .bubble{position:absolute; right:10px; background:#0ea5a9; color:#021018; padding:10px 14px; border-radius:16px; box-shadow:0 6px 18px rgba(0,0,0,0.4); animation:pop .28s ease;}
+  .bubble{position:absolute; right:10px; top:10px; background:#0ea5a9; color:#021018; padding:10px 14px; border-radius:16px; box-shadow:0 6px 18px rgba(0,0,0,0.4); animation:pop .28s ease;}
   @keyframes pop{from{transform:translateY(6px) scale(.98);opacity:0} to{transform:translateY(0) scale(1);opacity:1}}
   .muted-box{background:#071826;border-radius:8px;padding:8px;border:1px solid rgba(255,255,255,0.02);}
   .footer-note{font-size:12px;color:var(--muted); margin-top:8px;}
@@ -43,111 +43,95 @@
   .flex-col{display:flex;flex-direction:column;gap:8px;}
   .tiny{font-size:12px;color:var(--muted);}
   .handLabel{font-size:12px;padding:6px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.02);color:var(--muted);}
-  .toggles { display:flex; gap:8px; align-items:center; }
-  .toggles label { background: rgba(255,255,255,0.02); padding:6px 8px; border-radius:8px; display:flex; align-items:center; gap:6px; color:var(--muted); border:1px solid rgba(255,255,255,0.02); }
-  .toggles input[type="checkbox"]{ width:16px;height:16px; }
 </style>
 </head>
 <body>
-<div class="wrap">
-<div class="card">
-  <div class="video-box" id="videoWrap">
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
-  </div>
-
-  <div class="controls">
-    <button id="btnCamera" class="primary">Start Camera</button>
-    <button id="btnFullscreen">🖥️ Fullscreen Kamera</button>
-    <button id="btnRecord">🎥 Rekam Gestur</button>
-    <button id="btnStopRecord">⏹️ Stop Rekam</button>
-    <button id="btnAutoName">🔀 Auto-Name</button>
-    <button id="btnSnapshot">📸 Snapshot</button>
-    <a id="downloadLink" style="display:none"></a>
-  </div>
-
-  <div style="display:flex;gap:12px;margin-top:12px;align-items:center;justify-content:space-between;">
-    <div style="flex:1 1 auto; display:flex; gap:12px; align-items:center;">
-      <div style="flex:1;">
-        <label class="small">Nama Gestur</label><br>
-        <input id="gestureName" placeholder="kosongkan untuk auto-name" style="width:100%;">
+  <div class="wrap">
+    <div class="card">
+      <div class="video-box" id="videoWrap">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
       </div>
-      <div style="flex:1;">
-        <label class="small">Respon Suara</label><br>
-        <input id="gestureResponse" placeholder="Contoh: Halo!" style="width:100%;">
+
+      <div class="controls">
+        <button id="btnCamera" class="primary">Start Camera</button>
+        <button id="btnFullscreen">🖥️ Fullscreen Kamera</button>
+        <button id="btnRecord">🎥 Rekam Gestur</button>
+        <button id="btnStopRecord">⏹️ Stop Rekam</button>
+        <button id="btnAutoName">🔀 Auto-Name</button>
+        <button id="btnSnapshot">📸 Snapshot</button>
+        <a id="downloadLink" style="display:none"></a>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-top:12px;align-items:center;">
+        <div style="flex:1;">
+          <label class="small">Nama Gestur</label><br>
+          <input id="gestureName" placeholder="kosongkan untuk auto-name" style="width:100%;">
+        </div>
+        <div style="flex:1;">
+          <label class="small">Respon Suara</label><br>
+          <input id="gestureResponse" placeholder="Contoh: Halo!" style="width:100%;">
+        </div>
+        <div style="width:140px;">
+          <label class="small">Cooldown (ms)</label><br>
+          <input id="gestureCooldown" type="number" value="2500" style="width:100%;">
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-top:8px;align-items:center;">
+        <div style="flex:1;">
+          <label class="small">Sensitivity (threshold)</label>
+          <input id="sensitivity" type="range" min="0.8" max="5.0" step="0.1" value="3.0" style="width:100%;">
+          <div class="tiny">Nilai lebih kecil = lebih ketat (lebih sulit cocok). Saat ini: <span id="sVal">3.0</span></div>
+        </div>
+        <div style="width:160px;">
+          <label class="small">Global cooldown (ms)</label><br>
+          <input id="globalCooldown" type="number" value="500" style="width:100%;">
+        </div>
+      </div>
+
+      <div class="muted-box" style="margin-top:12px;">
+        <div id="status" class="small">Status: menunggu kamera...</div>
+        <div class="footer-note">Tips: tahan tombol <b>Rekam Gestur</b> selama ~1 detik untuk merekam beberapa frame. Setelah tersimpan, tunjukkan gestur untuk memicu respon suara. Kamera & FaceMesh berjalan bersamaan.</div>
       </div>
     </div>
-    <div style="width:160px;">
-      <label class="small">Cooldown (ms)</label><br>
-      <input id="gestureCooldown" type="number" value="2500" style="width:100%;">
-    </div>
-  </div>
 
-  <div style="display:flex;gap:12px;margin-top:8px;align-items:center;">
-    <div style="flex:1;">
-      <label class="small">Sensitivity (threshold)</label>
-      <input id="sensitivity" type="range" min="0.8" max="5.0" step="0.1" value="3.0" style="width:100%;">
-      <div class="tiny">Nilai lebih kecil = lebih ketat. Saat ini: <span id="sVal">3.0</span></div>
-    </div>
-    <div style="width:220px; display:flex; flex-direction:column; gap:6px;">
-      <label class="small">Global cooldown (ms)</label>
-      <input id="globalCooldown" type="number" value="500" style="width:100%;">
-      <div class="toggles" style="margin-top:6px;">
-        <label><input id="toggleHand" type="checkbox" checked> Hand</label>
-        <label><input id="toggleFace" type="checkbox" checked> Face</label>
-        <label><input id="toggleVoice" type="checkbox" checked> Voice</label>
-        <label><input id="toggleBubble" type="checkbox" checked> Bubble</label>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0">Daftar Gestur & Ekspresi</h3>
+        <div style="display:flex;gap:8px;">
+          <button id="exportBtn">⬇️ Export</button>
+          <input type="file" id="importFile" style="display:none"/>
+          <button id="importBtn">⬆️ Import</button>
+          <button id="clearBtn">🗑️ Clear All</button>
+        </div>
+      </div>
+
+      <div id="gesturesList" class="list" style="margin-top:10px;max-height:320px;overflow:auto;"></div>
+
+      <div style="margin-top:12px;">
+        <div class="bubble-area" id="bubbleArea"></div>
+      </div>
+
+      <div style="margin-top:12px;" class="flex-col">
+        <div class="row">
+          <button id="saveBtn" class="primary">💾 Simpan Gestur</button>
+          <button id="applySettings">Apply Settings</button>
+        </div>
+        <div class="small">Export/Import menyimpan seluruh template gesture (JSON). Simpan gesture sebelum export. Face expression auto diaktifkan — ada setting cooldown wajah di bawah.</div>
+        <div style="margin-top:8px;">
+          <label class="small">Face cooldown (ms)</label>
+          <input id="faceCooldown" type="number" value="3000" style="width:120px;">
+        </div>
       </div>
     </div>
   </div>
-
-  <div class="muted-box" style="margin-top:12px;">
-    <div id="status" class="small">Status: menunggu kamera...</div>
-    <div class="footer-note">Tips: tahan tombol <b>Rekam Gestur</b> selama ~1 detik untuk merekam beberapa frame. Setelah tersimpan, tunjukkan gestur untuk memicu respon suara. Kamera & FaceMesh berjalan bersamaan.</div>
-  </div>
-</div>
-
-<div class="card">
-  <div style="display:flex;justify-content:space-between;align-items:center;">
-    <h3 style="margin:0">Daftar Gestur & Ekspresi</h3>
-    <div style="display:flex;gap:8px;">
-      <button id="exportBtn">⬇️ Export</button>
-      <input type="file" id="importFile" style="display:none"/>
-      <button id="importBtn">⬆️ Import</button>
-      <button id="clearBtn">🗑️ Clear All</button>
-    </div>
-  </div>
-
-  <div id="gesturesList" class="list" style="margin-top:10px;max-height:320px;overflow:auto;"></div>
-
-  <div style="margin-top:12px;">
-    <div class="bubble-area" id="bubbleArea"></div>
-  </div>
-
-  <div style="margin-top:12px;" class="flex-col">
-    <div class="row">
-      <button id="saveBtn" class="primary">💾 Simpan Gestur</button>
-      <button id="applySettings">Apply Settings</button>
-    </div>
-    <div class="small">Export/Import menyimpan seluruh template gesture (JSON). Simpan gesture sebelum export. Face expression auto diaktifkan — ada setting cooldown wajah di bawah.</div>
-    <div style="margin-top:8px;">
-      <label class="small">Face cooldown (ms)</label>
-      <input id="faceCooldown" type="number" value="3000" style="width:120px;">
-    </div>
-  </div>
-</div>
-</div>
 
 <script>
-/* ============================================================
-   Stable version: Gesture unchanged, FaceMesh overlay accurate
-   ============================================================ */
-
-/* ===== DOM & State ===== */
+/* ====== DOM & State ====== */
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-
 const btnCamera = document.getElementById('btnCamera');
 const btnFullscreen = document.getElementById('btnFullscreen');
 const btnRecord = document.getElementById('btnRecord');
@@ -173,226 +157,383 @@ const clearBtn = document.getElementById('clearBtn');
 const applySettingsBtn = document.getElementById('applySettings');
 const faceCooldownInput = document.getElementById('faceCooldown');
 
-const toggleHand = document.getElementById('toggleHand');
-const toggleFace = document.getElementById('toggleFace');
-const toggleVoice = document.getElementById('toggleVoice');
-const toggleBubble = document.getElementById('toggleBubble');
-
 let cameraObj = null;
 let recording = false;
 let recordFrames = [];
 const RECORD_FRAME_COUNT = 18;
-let templates = [];
+let templates = []; // template objects {id,name,response,cooldown,landmarks,lastTriggered}
 let lastGlobalTrigger = 0;
 let lastFaceTrigger = 0;
-let lastFaceExpression = null; // new: only trigger if expression berubah
 
-/* ===== UI hookup ===== */
-sVal.innerText = sensitivityRange.value;
+/* ====== UI Small hookups ====== */
 sensitivityRange.addEventListener('input', ()=> sVal.innerText = sensitivityRange.value );
 
-/* ===== Speech & bubble ===== */
+/* ====== Speech & bubble ====== */
 function speak(text){
-  if(!toggleVoice.checked) return;
   const now = Date.now();
   const globalCd = parseInt(globalCooldownInput.value)||500;
   if(now - lastGlobalTrigger < globalCd) return;
   lastGlobalTrigger = now;
+
   const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = document.documentElement.lang || "id-ID";
-  speechSynthesis.cancel();
+  utter.lang = "id-ID";
+  speechSynthesis.cancel(); // reduce overlaps
   speechSynthesis.speak(utter);
-  if(toggleBubble.checked) showBubble(text);
+  showBubble(text);
 }
 function showBubble(text){
-  if(!toggleBubble.checked) return;
-  const children = bubbleArea.children.length;
-  const el = document.createElement('div');
-  el.className = 'bubble';
-  el.style.top = `${10 + children*52}px`;
-  el.textContent = `🤖 ${text}`;
-  bubbleArea.appendChild(el);
-  setTimeout(()=>{
-    el.style.transition = 'opacity .18s, transform .18s';
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(-6px)';
-    setTimeout(()=> el.remove(), 180);
-  }, 3000);
+  bubbleArea.innerHTML = `<div class="bubble">🤖 ${escapeHtml(text)}</div>`;
+  setTimeout(()=>{ bubbleArea.innerHTML=''; }, 3000);
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>'&#'+c.charCodeAt(0)+';'); }
 
-/* ====== Gestur normalization & comparison (stable original) ===== */
-function normalizeSingle(raw){
+/* ====== Normalization & comparison ====== */
+function normalizeLandmarks(raw){
   const ref = raw[0];
-  const pts = raw.map(p => ({x:p.x-ref.x, y:p.y-ref.y}));
-  let maxd=1e-6;
-  pts.forEach(p=>{ const d=Math.hypot(p.x,p.y); if(d>maxd) maxd=d; });
-  return pts.map(p=>({x:p.x/maxd,y:p.y/maxd}));
+  const pts = raw.map(p => ({x: p.x - ref.x, y: p.y - ref.y}));
+  let maxd = 1e-6;
+  for(const p of pts){ const d = Math.hypot(p.x,p.y); if(d>maxd) maxd = d; }
+  return pts.map(p => ({x: p.x / maxd, y: p.y / maxd}));
 }
-function normalizeMulti(handsArray){ return handsArray.map(normalizeSingle); }
-function averageFramesMulti(frames){
+function averageFrames(frames){
   if(frames.length===0) return null;
-  const handCount = frames[0].length;
-  const valid = frames.filter(f=>f.length===handCount);
-  if(valid.length===0) return null;
-  const sumHands = [];
-  for(let h=0;h<handCount;h++){
-    const sum = Array(21).fill(0).map(()=>({x:0,y:0}));
-    valid.forEach(f=>{ for(let i=0;i<21;i++){ sum[i].x+=f[h][i].x; sum[i].y+=f[h][i].y; } });
-    const n=valid.length;
-    sumHands.push(sum.map(p=>({x:p.x/n,y:p.y/n})));
-  }
-  return sumHands;
+  const sum = Array(21).fill(0).map(()=>({x:0,y:0}));
+  frames.forEach(f=>{ for(let i=0;i<21;i++){ sum[i].x += f[i].x; sum[i].y += f[i].y; } });
+  const n = frames.length;
+  return sum.map(p=>({x:p.x/n, y:p.y/n}));
 }
-function compareSingle(a,b){ let s=0; for(let i=0;i<21;i++) s+=Math.abs(a[i].x-b[i].x)+Math.abs(a[i].y-b[i].y); return s; }
-function compareMultiTemplate(templateHands,currentHands){
-  if(!templateHands||!currentHands) return Infinity;
-  if(templateHands.length!==currentHands.length) return Infinity;
-  const n=templateHands.length;
-  if(n===1) return compareSingle(templateHands[0],currentHands[0]);
-  let sum=0;
-  for(let i=0;i<n;i++) sum+=compareSingle(templateHands[i],currentHands[i]);
-  return sum/n;
+function compareTemplates(a,b){
+  let s = 0;
+  for(let i=0;i<21;i++){ s += Math.abs(a[i].x - b[i].x) + Math.abs(a[i].y - b[i].y); }
+  return s;
 }
 
-/* ====== Draw ===== */
-function drawHands(ctx, multiLandmarks){
-  if(!toggleHand.checked) return;
-  multiLandmarks.forEach(hand=>{
-    window.drawConnectors(ctx, hand, window.HAND_CONNECTIONS,{color:'#0ea5a9',lineWidth:2});
-    window.drawLandmarks(ctx, hand,{color:'#38bdf8',lineWidth:1,radius:3});
+/* ====== Templates UI ====== */
+function renderTemplates(){
+  gesturesListEl.innerHTML = templates.length ? '' : '<div class="tiny">(Belum ada gesture tersimpan)</div>';
+  templates.forEach(t=>{
+    const el = document.createElement('div'); el.className='gesture-item';
+    const left = document.createElement('div'); left.className='gesture-left';
+    left.innerHTML = `<div><b>${t.name}</b><div class="badge tiny">${t.response}</div></div>`;
+    const right = document.createElement('div');
+    right.innerHTML = `
+      <div class="row">
+        <button data-id="${t.id}" class="editBtn">✏️</button>
+        <button data-id="${t.id}" class="delBtn">🗑️</button>
+        <button data-id="${t.id}" class="testBtn">▶️ Test</button>
+      </div>
+    `;
+    el.appendChild(left); el.appendChild(right);
+    gesturesListEl.appendChild(el);
+  });
+
+  // handlers
+  document.querySelectorAll('.delBtn').forEach(b=>{
+    b.onclick = ()=>{ const id=b.dataset.id; templates = templates.filter(x=>x.id!==id); renderTemplates(); };
+  });
+  document.querySelectorAll('.editBtn').forEach(b=>{
+    b.onclick = ()=>{
+      const id=b.dataset.id; const t = templates.find(x=>x.id===id); if(!t) return;
+      const newName = prompt('Ubah nama gesture', t.name); if(newName===null) return;
+      const newResp = prompt('Ubah respon suara', t.response); if(newResp===null) return;
+      const newCd = prompt('Cooldown (ms) untuk gestur ini', t.cooldown||gestureCooldownInput.value); if(newCd===null) return;
+      t.name = newName || t.name; t.response = newResp || t.response; t.cooldown = parseInt(newCd)|| (parseInt(gestureCooldownInput.value)||2500);
+      renderTemplates();
+    };
+  });
+  document.querySelectorAll('.testBtn').forEach(b=>{
+    b.onclick = ()=>{ const id=b.dataset.id; const t = templates.find(x=>x.id===id); if(t) speak(t.response); };
   });
 }
-function drawFaceMesh(ctx, faceLandmarks){
-  if(!toggleFace.checked) return;
-  ctx.strokeStyle = '#f43f5e';
-  ctx.lineWidth = 1;
-  ctx.fillStyle = 'rgba(244,63,94,0.2)';
-  faceLandmarks.forEach(p=>{
-    const x = p.x*canvas.width;
-    const y = p.y*canvas.height;
-    ctx.beginPath();
-    ctx.arc(x,y,1.5,0,2*Math.PI);
-    ctx.fill();
-  });
+
+/* ====== Save / Export / Import / Clear ====== */
+saveBtn.onclick = ()=>{
+  if(!recordFrames.length){ alert('Rekam gesture dulu (tombol Rekam).'); return; }
+  const avg = averageFrames(recordFrames);
+  if(!avg){ alert('Gagal merekam.'); return; }
+  const normalized = normalizeLandmarks(avg);
+  const name = gestureNameInput.value.trim() || autoNameFromTemplate(normalized);
+  const response = gestureResponseInput.value.trim() || prompt('Masukkan respon suara untuk gestur ini:') || 'Halo';
+  const cooldown = parseInt(gestureCooldownInput.value) || 2500;
+  const id = 'g'+Date.now().toString(36);
+  templates.push({id,name,response,cooldown,landmarks:normalized,lastTriggered:0});
+  recordFrames = []; recording = false;
+  statusEl.innerText = `✅ Gestur "${name}" tersimpan. (${templates.length} total)`;
+  renderTemplates();
+};
+
+exportBtn.onclick = ()=>{
+  const data = JSON.stringify(templates);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='gestures.json'; a.click();
+};
+
+importBtn.onclick = ()=> importFile.click();
+importFile.onchange = (e)=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    try{
+      const data = JSON.parse(ev.target.result);
+      if(Array.isArray(data)){
+        templates = data.map(d=>({...d, lastTriggered:0}));
+        renderTemplates();
+        statusEl.innerText = '✅ Import sukses.';
+      } else alert('Format JSON tidak valid');
+    }catch(err){ alert('File JSON tidak valid'); }
+  };
+  reader.readAsText(f);
+};
+
+clearBtn.onclick = ()=>{
+  if(confirm('Hapus semua gesture?')){ templates=[]; renderTemplates(); statusEl.innerText='Semua gesture dihapus'; }
+};
+
+/* ====== Auto-name heuristic ====== */
+function autoNameFromTemplate(norm){
+  try{
+    const tips = [4,8,12,16,20], pips = [3,6,10,14,18];
+    let ext = 0;
+    for(let i=0;i<5;i++){ if(norm[tips[i]].y < norm[pips[i]].y) ext++; }
+    if(ext>=4) return 'open_palm';
+    if(ext===0) return 'fist';
+    return `${ext}_fingers`;
+  }catch(e){ return 'gesture_'+Date.now().toString(36); }
+}
+btnAutoName.onclick = ()=>{
+  if(!recordFrames.length){ alert('Rekam gesture dulu.'); return; }
+  const avg = averageFrames(recordFrames);
+  const name = autoNameFromTemplate(normalizeLandmarks(avg));
+  gestureNameInput.value = name;
+};
+
+/* ====== Recording controls ====== */
+btnRecord.onclick = ()=>{ recording = true; recordFrames = []; statusEl.innerText = '⏺️ Merekam gesture... tahan sampai selesai.'; };
+btnStopRecord.onclick = ()=>{ recording = false; statusEl.innerText = '⏹️ Rekaman dihentikan. Klik Simpan Gestur untuk menyimpan.'; };
+
+/* ====== Snapshot ====== */
+btnSnapshot.onclick = ()=>{
+  const temp = document.createElement('canvas'); temp.width = canvas.width; temp.height = canvas.height;
+  const tctx = temp.getContext('2d');
+  tctx.save(); tctx.scale(-1,1); tctx.drawImage(video, -temp.width, 0, temp.width, temp.height); tctx.restore();
+  tctx.drawImage(canvas, 0, 0, temp.width, temp.height);
+  temp.toBlob(blob=>{
+    const url = URL.createObjectURL(blob);
+    downloadLink.href = url; downloadLink.download='snapshot.png'; downloadLink.click();
+  }, 'image/png', 0.95);
+};
+
+/* ====== Fullscreen ====== */
+btnFullscreen.onclick = async ()=>{
+  const el = document.getElementById('videoWrap');
+  try{
+    if(!document.fullscreenElement) await el.requestFullscreen();
+    else await document.exitFullscreen();
+  }catch(e){ console.warn('Fullscreen error', e); }
+};
+
+/* ====== Detection (Hands & Face) ====== */
+
+/* helpers for face heuristics */
+function faceMetrics(landmarks){
+  // landmarks in normalized coords (x,y,z) length ~468
+  // mouth open: distance between upper lip (13) and lower lip (14) or 13 & 14
+  const upperLip = landmarks[13];
+  const lowerLip = landmarks[14];
+  const mouthOpen = Math.hypot((upperLip.x-lowerLip.x), (upperLip.y-lowerLip.y));
+
+  // eye openness (left & right): use landmarks (159,145) and (386,374) approximations
+  const leftTop = landmarks[159], leftBottom = landmarks[145];
+  const rightTop = landmarks[386], rightBottom = landmarks[374];
+  const leftEye = Math.hypot(leftTop.x-leftBottom.x, leftTop.y-leftBottom.y);
+  const rightEye = Math.hypot(rightTop.x-rightBottom.x, rightTop.y-rightBottom.y);
+  // brow vs eye: distance between brow (10-ish) and eye to detect frown/sad (approx)
+  const leftBrow = landmarks[65], rightBrow = landmarks[295];
+  const leftFrown = Math.hypot(leftBrow.x-leftTop.x, leftBrow.y-leftTop.y);
+  const rightFrown = Math.hypot(rightBrow.x-rightTop.x, rightBrow.y-rightTop.y);
+
+  return { mouthOpen, leftEye, rightEye, leftFrown, rightFrown };
 }
 
-/* ====== MediaPipe Setup ===== */
-const hands = new Hands({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-hands.setOptions({maxNumHands:2,minDetectionConfidence:0.7,minTrackingConfidence:0.6});
-hands.onResults(onHandsResults);
+/* face cooldown & thresholds */
+const FACE_YAWN_THRESHOLD = 0.055; // adjust if needed
+const FACE_SLEEP_THRESHOLD = 0.015; // eye openness small => sleepy
+const FACE_SAD_THRESHOLD = 0.02; // brow proximity changed
 
-const faceMesh = new FaceMesh({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
-faceMesh.setOptions({maxNumFaces:1,minDetectionConfidence:0.7,minTrackingConfidence:0.6});
-faceMesh.onResults(onFaceResults);
+let faceMesh = null;
+let hands = null;
+let cam = null;
 
+/* main hands onResults (multi-hand support) */
 function onHandsResults(results){
+  // ensure canvas size
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  ctx.save();
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(results.multiHandLandmarks) drawHands(ctx, results.multiHandLandmarks);
-  if(faceLandmarksBuffer) drawFaceMesh(ctx, faceLandmarksBuffer);
+  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-  if(recording && results.multiHandLandmarks) recordFrames.push(results.multiHandLandmarks.map(l=>l.map(p=>({x:p.x,y:p.y}))));
-  
-  if(results.multiHandLandmarks && templates.length){
-    const normalizedCurrent = normalizeMulti(results.multiHandLandmarks.map(l=>l.map(p=>({x:p.x,y:p.y}))));
-    templates.forEach(t=>{
-      const score = compareMultiTemplate(t.hands,normalizedCurrent);
-      const threshold = parseFloat(sensitivityRange.value)||3.0;
-      const now = Date.now();
-      if(score<threshold && now - (t.lastTriggered||0) > (parseInt(gestureCooldownInput.value)||2500)){
-        speak(t.response||'🤖 Gesture detected!');
-        t.lastTriggered = now;
+  // draw face overlays if we have face landmarks saved by face callback (faceDrawing happens elsewhere)
+  // draw hands
+  if(results.multiHandLandmarks && results.multiHandLandmarks.length>0){
+    results.multiHandLandmarks.forEach((lm, idx)=>{
+      // color by hand index
+      const color = idx===0 ? '#00ffb3' : '#66d9ff';
+      window.drawConnectors(ctx, lm, window.HAND_CONNECTIONS, {color:color, lineWidth:3});
+      window.drawLandmarks(ctx, lm, {color:'#ffd600', lineWidth:2, radius:3});
+
+      statusEl.innerText = `👀 ${results.multiHandLandmarks.length} tangan terdeteksi`;
+
+      // process frame for recording or recognition
+      const simple = lm.map(p=>({x:p.x, y:p.y}));
+      if(recording){
+        recordFrames.push(simple);
+        if(recordFrames.length >= RECORD_FRAME_COUNT){
+          recording = false;
+          statusEl.innerText = '✅ Rekaman selesai. Klik Simpan Gestur.';
+        } else {
+          statusEl.innerText = `⏺️ Merekam... (${recordFrames.length}/${RECORD_FRAME_count||RECORD_FRAME_COUNT})`;
+        }
+      } else {
+        // recognition: normalize current and compare with templates
+        if(templates.length>0){
+          const normCurrent = normalizeLandmarks(simple);
+          let best=null, bestDist=Infinity;
+          for(const t of templates){
+            const d = compareTemplates(t.landmarks, normCurrent);
+            if(d < bestDist){ bestDist = d; best = t; }
+          }
+          const threshold = parseFloat(sensitivityRange.value) || 3.0;
+          if(best && bestDist < threshold){
+            const now = Date.now();
+            const tcd = best.cooldown || (parseInt(gestureCooldownInput.value) || 2500);
+            if(!best.lastTriggered) best.lastTriggered = 0;
+            if(now - best.lastTriggered > tcd){
+              best.lastTriggered = now;
+              flashHighlight();
+              speak(best.response);
+              statusEl.innerText = `✅ Gesture "${best.name}" terdeteksi (score ${bestDist.toFixed(2)})`;
+            } else {
+              statusEl.innerText = `🔒 Gesture "${best.name}" cocok tetapi on cooldown`;
+            }
+          }
+        }
       }
     });
+  } else {
+    statusEl.innerText = '👀 Tidak ada tangan';
   }
+  ctx.restore();
 }
 
-let faceLandmarksBuffer = null;
+/* face callback */
 function onFaceResults(results){
-  if(results.multiFaceLandmarks && results.multiFaceLandmarks[0]){
-    faceLandmarksBuffer = results.multiFaceLandmarks[0];
+  // draw small face landmarks overlay
+  if(results.multiFaceLandmarks && results.multiFaceLandmarks.length>0){
+    const face = results.multiFaceLandmarks[0];
+    // optional: draw mesh lightly
+    window.drawConnectors(ctx, face, window.FACEMESH_TESSELATION, {color:'#ffffff22', lineWidth:1});
+    const m = faceMetrics(face);
     const now = Date.now();
-    const faceCd = parseInt(faceCooldownInput.value)||3000;
-    if(now - lastFaceTrigger > faceCd){
-      lastFaceTrigger = now;
-      if(toggleFace.checked){
-        speak("🙂 Wajah terdeteksi");
+    const faceCd = parseInt(faceCooldownInput.value) || 3000;
+
+    // yawn detection
+    if(m.mouthOpen > FACE_YAWN_THRESHOLD){
+      if(now - lastFaceTrigger > faceCd){
+        lastFaceTrigger = now;
+        speak('Kamu kelihatan menguap, istirahat dulu ya');
+        statusEl.innerText = '😮 Terlihat menguap';
       }
+      return;
     }
+
+    // sleepy detection (both eyes small)
+    if(m.leftEye < FACE_SLEEP_THRESHOLD && m.rightEye < FACE_SLEEP_THRESHOLD){
+      if(now - lastFaceTrigger > faceCd){
+        lastFaceTrigger = now;
+        speak('Kamu mengantuk, jangan dipaksa ya');
+        statusEl.innerText = '😴 Terlihat mengantuk';
+      }
+      return;
+    }
+
+    // sad detection heuristic: brows closer to eyes (smaller leftFrown/rightFrown) or mouth corners slightly down
+    if(m.leftFrown < FACE_SAD_THRESHOLD || m.rightFrown < FACE_SAD_THRESHOLD){
+      if(now - lastFaceTrigger > faceCd){
+        lastFaceTrigger = now;
+        speak('Kamu kelihatan sedih, semoga harimu segera membaik');
+        statusEl.innerText = '😔 Terlihat sedih/murung';
+      }
+      return;
+    }
+
+    // else clear face status if nothing
+    // (do not override hand message)
   }
 }
 
-/* ====== Camera ===== */
+/* flash highlight */
+function flashHighlight(){
+  const vb = document.getElementById('videoWrap');
+  vb.classList.add('highlight');
+  setTimeout(()=>vb.classList.remove('highlight'), 420);
+}
+
+/* ====== MediaPipe & Camera init ====== */
+hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
+hands.onResults(onHandsResults);
+
+faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
+faceMesh.onResults(onFaceResults);
+
 async function startCamera(){
-  if(cameraObj) return;
-  cameraObj = new Camera(video,{
-    onFrame: async()=>{ await hands.send({image:video}); await faceMesh.send({image:video}); },
-    width:680, height:480
-  });
-  cameraObj.start();
-  statusEl.innerText = '✅ Kamera aktif';
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}, audio:false});
+    video.srcObject = stream;
+    await video.play();
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    cameraObj = new Camera(video, {
+      onFrame: async () => {
+        // send both to hands and faceMesh
+        await hands.send({image: video});
+        await faceMesh.send({image: video});
+      },
+      width: video.videoWidth,
+      height: video.videoHeight
+    });
+    cameraObj.start();
+    btnCamera.innerText = 'Stop Camera';
+    statusEl.innerText = '✅ Kamera berjalan';
+  }catch(err){
+    console.error(err); alert('Gagal akses kamera: ' + err.message); statusEl.innerText = '❌ Gagal akses kamera';
+  }
 }
-btnCamera.addEventListener('click', startCamera);
-btnFullscreen.addEventListener('click', ()=>{ if(document.fullscreenElement){document.exitFullscreen()} else video.requestFullscreen(); });
-
-/* ====== Gesture record ===== */
-btnRecord.addEventListener('click', ()=>{
-  recording = true;
-  recordFrames=[];
-  statusEl.innerText = '🎥 Merekam gestur...';
-});
-btnStopRecord.addEventListener('click', ()=>{
-  recording = false;
-  if(recordFrames.length){
-    const avgHands = averageFramesMulti(recordFrames);
-    const name = gestureNameInput.value || `Gesture_${templates.length+1}`;
-    const resp = gestureResponseInput.value || 'Halo!';
-    templates.push({hands:avgHands,name:name,response:resp,lastTriggered:0});
-    renderGestures();
-    statusEl.innerText = `✅ Gestur "${name}" tersimpan!`;
-    recordFrames=[];
-  } else statusEl.innerText = '⚠️ Tidak ada frame direkam!';
-});
-
-/* ====== Render list ===== */
-function renderGestures(){
-  gesturesListEl.innerHTML = '';
-  templates.forEach((t,i)=>{
-    const div = document.createElement('div');
-    div.className='gesture-item';
-    div.innerHTML = `<div class="gesture-left">${escapeHtml(t.name)}</div><div class="badge">${escapeHtml(t.response)}</div>`;
-    gesturesListElEl.appendChild(div);
-  });
+function stopCamera(){
+  if(cameraObj){ cameraObj.stop(); cameraObj = null; }
+  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
+  btnCamera.innerText = 'Start Camera';
+  statusEl.innerText = 'Kamera dihentikan';
 }
+btnCamera.onclick = ()=> { if(!cameraObj) startCamera(); else stopCamera(); };
 
-/* ====== Export/Import ===== */
-exportBtn.addEventListener('click', ()=>{
-  const blob = new Blob([JSON.stringify(templates)],{type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  downloadLink.href = url;
-  downloadLink.download = 'gestures.json';
-  downloadLink.click();
+/* init */
+renderTemplates();
+
+/* keyboard shortcuts */
+document.addEventListener('keydown', (e)=>{
+  if(e.key==='r') btnRecord.click();
+  if(e.key==='s') btnStopRecord.click();
 });
 
-importBtn.addEventListener('click', ()=> importFile.click());
-importFile.addEventListener('change', (e)=>{
-  const f = e.target.files[0];
-  if(f){ const reader = new FileReader(); reader.onload=()=>{ templates = JSON.parse(reader.result); renderGestures(); }; reader.readAsText(f);}
-});
+/* apply settings button hook (simple acknowledgement) */
+applySettingsBtn.onclick = ()=> { statusEl.innerText = 'Settings applied.'; };
 
-clearBtn.addEventListener('click', ()=>{ templates=[]; renderGestures(); });
-
-saveBtn.addEventListener('click', ()=>{ statusEl.innerText='✅ Semua gesture tersimpan (session)'; });
-applySettingsBtn.addEventListener('click', ()=>{ statusEl.innerText='⚙️ Setting diterapkan'; });
-
-/* ===== Snapshot ===== */
-btnSnapshot.addEventListener('click', ()=>{
-  const snapshot = canvas.toDataURL('image/png');
-  const a = document.createElement('a');
-  a.href = snapshot;
-  a.download='snapshot.png';
-  a.click();
-});
+/* small compatibility: ensure RECORD_FRAME_COUNT ref works in messages */
+const RECORD_FRAME_count = RECORD_FRAME_COUNT;
 </script>
 </body>
 </html>
