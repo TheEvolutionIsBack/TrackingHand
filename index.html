@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hand Tracking + Google Voice Control</title>
+  <style>
+    :root{
+      --bg:#0f1724; --card:#0b1220; --accent:#06b6d4; --muted:#9aa6b2;
+      --glass: rgba(255,255,255,0.03);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    body{ margin:0; background:linear-gradient(180deg,#071126 0%, #0b1220 100%); color:#e6eef6; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:18px;}
+    .app{ width:100%; max-width:1100px; display:grid; grid-template-columns: 640px 1fr; gap:18px; }
+    .card{ background:var(--card); border-radius:12px; padding:12px; box-shadow: 0 6px 18px rgba(2,6,23,0.6); }
+    .video-wrap{ position:relative; border-radius:10px; overflow:hidden; background:#000; height:480px; display:flex; align-items:center; justify-content:center; }
+    video{ width:100%; height:100%; object-fit:cover; transform: scaleX(-1); } /* mirror */
+    canvas{ position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; transform: scaleX(-1); }
+    .controls{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    button{ background:var(--glass); border:1px solid rgba(255,255,255,0.04); color:inherit; padding:8px 12px; border-radius:8px; cursor:pointer; }
+    button.primary{ background:linear-gradient(90deg,var(--accent),#7dd3fc22); border:none; color:#021018; font-weight:600; }
+    .status{ font-size:13px; color:var(--muted); margin-top:8px; }
+    .list{ padding:10px; display:flex; flex-direction:column; gap:8px; max-height:480px; overflow:auto; }
+    .box{ background:linear-gradient(180deg,#071827, #05202b); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
+    .big{ font-size:20px; font-weight:600; color:#dff7fa; }
+    .small{ font-size:13px; color:var(--muted); }
+    .recognized{ margin-top:8px; font-weight:600; color:#a7f3d0; }
+    a.download{ display:inline-block; margin-top:6px; text-decoration:none; color:var(--accent); }
+    footer{ margin-top:10px; font-size:12px; color:var(--muted); }
+  </style>
+  <!-- MediaPipe CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+</head>
+<body>
+  <div class="app">
+    <div class="card">
+      <div class="video-wrap" id="videoWrap">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <div class="controls">
+        <button id="btnCamera" class="primary">Start Camera</button>
+        <button id="btnSnapshot">Capture Snapshot</button>
+        <button id="btnStartRec">Start Voice</button>
+        <button id="btnStopRec">Stop Voice</button>
+        <button id="btnToggleGest">Toggle Gestures</button>
+        <a id="downloadLink" class="download" style="display:none">Download Snapshot</a>
+      </div>
+
+      <div class="status">
+        <div>Camera: <span id="camStatus">stopped</span></div>
+        <div>Hand: <span id="handStatus">none</span></div>
+        <div>Gesture: <span id="gesture">—</span></div>
+        <div>Voice: <span id="voiceStatus">idle</span></div>
+      </div>
+
+      <footer>
+        Tips: izinkan akses kamera & mikrofon. Voice memakai Web Speech API (Chrome/Edge rekomendasi). Gestur sederhana: open palm → start voice, fist → stop voice, index-point → snapshot.
+      </footer>
+    </div>
+
+    <div class="card list">
+      <div class="box">
+        <div class="big">Recognized voice</div>
+        <div id="recognizedText" class="recognized">—</div>
+        <div class="small">Perintah contoh: "start", "stop", "capture", "zoom in", "zoom out".</div>
+      </div>
+
+      <div class="box">
+        <div class="big">Logs</div>
+        <div id="logArea" class="small">No logs yet.</div>
+      </div>
+
+      <div class="box">
+        <div class="big">Gesture rules</div>
+        <div class="small">
+          - Open palm: semua jari terluar terangkat & dianggap <b>start</b> voice.<br/>
+          - Fist: semua jari dilipat → <b>stop</b> voice.<br/>
+          - Index point (hanya index terangkat): ambil <b>snapshot</b>.
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(async function(){
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const btnCamera = document.getElementById('btnCamera');
+  const btnSnapshot = document.getElementById('btnSnapshot');
+  const btnStartRec = document.getElementById('btnStartRec');
+  const btnStopRec = document.getElementById('btnStopRec');
+  const btnToggleGest = document.getElementById('btnToggleGest');
+  const downloadLink = document.getElementById('downloadLink');
+  const camStatus = document.getElementById('camStatus');
+  const handStatus = document.getElementById('handStatus');
+  const gestureLabel = document.getElementById('gesture');
+  const voiceStatus = document.getElementById('voiceStatus');
+  const recognizedText = document.getElementById('recognizedText');
+  const logArea = document.getElementById('logArea');
+
+  let camera = null;
+  let gesturesEnabled = true;
+  let latestSnapshotBlob = null;
+
+  function log(msg){
+    const time = new Date().toLocaleTimeString();
+    logArea.innerText = `[${time}] ${msg}\n` + logArea.innerText;
+  }
+
+  // Resize canvas to video
+  function resizeCanvas(){
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+  }
+
+  // Simple gesture detection using landmarks
+  function detectGesture(landmarks){
+    // landmarks: array of 21 {x,y,z} normalized (0..1), mirrored because we mirrored video
+    // We'll treat finger extended when tip.y < pip.y (y increases down)
+    const tips = [4,8,12,16,20];
+    const pips = [3,6,10,14,18];
+    const extended = [];
+    for(let i=0;i<5;i++){
+      const tip = landmarks[tips[i]];
+      const pip = landmarks[pips[i]];
+      if(!tip || !pip) { extended[i]=false; continue; }
+      extended[i] = (tip.y < pip.y); // true = extended
+    }
+    // open palm = most fingers extended (index..pinky)
+    const fingersExceptThumb = extended.slice(1);
+    const countExt = fingersExceptThumb.filter(Boolean).length;
+    const thumbExt = extended[0];
+    if(countExt >= 4 && thumbExt) return 'open_palm';
+    if(countExt === 0 && !thumbExt) return 'fist';
+    if(extended[1] && !extended[2] && !extended[3] && !extended[4]) return 'point_index';
+    return 'unknown';
+  }
+
+  // Setup MediaPipe Hands
+  const hands = new window.Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6
+  });
+
+  hands.onResults(onResults);
+
+  // Camera util from mediapipe
+  async function startCamera(){
+    if (camera) return;
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio:false});
+      video.srcObject = stream;
+      await video.play();
+      resizeCanvas();
+      camera = new Camera(video, {
+        onFrame: async () => {
+          await hands.send({image: video});
+        },
+        width: video.videoWidth || 1280,
+        height: video.videoHeight || 720
+      });
+      camera.start();
+      camStatus.innerText = 'running';
+      btnCamera.innerText = 'Stop Camera';
+      log('Camera started');
+    }catch(err){
+      console.error(err);
+      alert('Gagal mengakses kamera: ' + err.message);
+      log('Camera error: ' + err.message);
+    }
+  }
+
+  async function stopCamera(){
+    if(camera){
+      camera.stop();
+      camera = null;
+    }
+    if(video.srcObject){
+      const tracks = video.srcObject.getTracks();
+      tracks.forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    camStatus.innerText = 'stopped';
+    btnCamera.innerText = 'Start Camera';
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    log('Camera stopped');
+  }
+
+  btnCamera.addEventListener('click', async ()=>{
+    if(camStatus.innerText === 'stopped') await startCamera(); else await stopCamera();
+  });
+
+  btnToggleGest.addEventListener('click', ()=>{ gesturesEnabled = !gesturesEnabled; btnToggleGest.innerText = gesturesEnabled ? 'Disable Gestures' : 'Enable Gestures'; log('Gestures ' + (gesturesEnabled?'enabled':'disabled')); });
+
+  // Snapshot
+  function snapshot(){
+    // draw current canvas + video to offscreen and make blob
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tctx = tempCanvas.getContext('2d');
+    // draw video mirrored back to normal orientation for saved image
+    tctx.save();
+    tctx.scale(-1,1);
+    tctx.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
+    tctx.restore();
+    tctx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+    tempCanvas.toBlob((blob)=>{
+      latestSnapshotBlob = blob;
+      const url = URL.createObjectURL(blob);
+      downloadLink.href = url;
+      downloadLink.download = 'snapshot.png';
+      downloadLink.style.display = 'inline-block';
+      downloadLink.innerText = 'Download Snapshot';
+      log('Snapshot captured');
+    }, 'image/png', 0.95);
+  }
+  btnSnapshot.addEventListener('click', snapshot);
+
+  // MediaPipe results handler
+  function onResults(results){
+    resizeCanvas();
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // draw mirrored
+    ctx.save();
+    ctx.scale(-1,1);
+    ctx.translate(-canvas.width,0);
+    if(results.image){
+      // draw image if needed (we already display video). skip to drawing landmarks
+    }
+    ctx.restore();
+
+    if(results.multiHandLandmarks && results.multiHandLandmarks.length>0){
+      const landmarks = results.multiHandLandmarks[0];
+      handStatus.innerText = 'detected';
+      // draw landmarks using drawing utils
+      window.drawConnectors(ctx, landmarks, window.HAND_CONNECTIONS, {lineWidth:4, color:'#00ffd6'});
+      window.drawLandmarks(ctx, landmarks, {lineWidth:2, color:'#ffd600', radius:3});
+
+      // Gesture detection
+      const g = detectGesture(landmarks);
+      gestureLabel.innerText = g;
+      if(gesturesEnabled){
+        if(g === 'open_palm') {
+          // start voice recognition
+          if(voiceController && !voiceController.isRunning) voiceController.start();
+          log('Gesture detected: open_palm -> start voice');
+        } else if(g === 'fist'){
+          if(voiceController && voiceController.isRunning) voiceController.stop();
+          log('Gesture detected: fist -> stop voice');
+        } else if(g === 'point_index'){
+          snapshot();
+          log('Gesture detected: index point -> snapshot');
+        }
+      }
+    } else {
+      handStatus.innerText = 'none';
+      gestureLabel.innerText = '—';
+    }
+  }
+
+  // --- Voice (Web Speech API) ---
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  let voiceController = null;
+  if(!SpeechRecognition){
+    voiceStatus.innerText = 'Not supported in this browser';
+    log('Web Speech API not supported.');
+  } else {
+    voiceController = new SpeechRecognition();
+    voiceController.lang = 'id-ID'; // set to Indonesian; change to 'en-US' if you prefer English
+    voiceController.interimResults = false;
+    voiceController.continuous = true;
+
+    voiceController.onstart = ()=>{ voiceStatus.innerText = 'listening'; log('Voice recognition started'); };
+    voiceController.onend = ()=>{ voiceStatus.innerText = 'idle'; log('Voice recognition stopped'); };
+    voiceController.onerror = (evt)=>{ voiceStatus.innerText = 'error'; log('Voice error: ' + evt.error); };
+
+    voiceController.onresult = (evt)=>{
+      const last = evt.results.length - 1;
+      const transcript = evt.results[last][0].transcript.trim();
+      recognizedText.innerText = transcript;
+      log('Recognized: ' + transcript);
+      handleVoiceCommand(transcript.toLowerCase());
+    };
+  }
+
+  function handleVoiceCommand(text){
+    // simple mapping
+    if(text.includes('start')) {
+      if(voiceController && !voiceController.isRunning) voiceController.start();
+      log('Command -> start recognition');
+    } else if(text.includes('stop')) {
+      if(voiceController && voiceController.isRunning) voiceController.stop();
+      log('Command -> stop recognition');
+    } else if(text.includes('capture') || text.includes('snapshot') || text.includes('foto')){
+      snapshot();
+      log('Command -> capture snapshot');
+    } else if(text.includes('zoom in')){
+      // example action: scale video element
+      video.style.transform = 'scale(1.1) translateX(-0%)';
+      log('Command -> zoom in');
+    } else if(text.includes('zoom out')){
+      video.style.transform = 'scale(1) translateX(-0%)';
+      log('Command -> zoom out');
+    } else {
+      log('Command not mapped: ' + text);
+    }
+  }
+
+  btnStartRec.addEventListener('click', ()=>{ if(voiceController){ try{ voiceController.start(); } catch(e){ log('Voice start error: ' + e.message);} }});
+  btnStopRec.addEventListener('click', ()=>{ if(voiceController){ voiceController.stop(); }});
+
+  // Expose a flag to know if recognition is running
+  Object.defineProperty(window, 'voiceIsRunning', {
+    get: ()=> voiceController ? (voiceController._running || false) : false
+  });
+
+  // Small polyfill to track running state (SpeechRecognition lacks standard flag)
+  if(voiceController){
+    voiceController.addEventListener('start', ()=> voiceController.isRunning = true);
+    voiceController.addEventListener('end', ()=> voiceController.isRunning = false);
+  }
+
+  // Try auto-start camera for convenience
+  // (comment out if you prefer manual start)
+  // await startCamera();
+
+  // Optional: try to start camera automatically on user gesture to avoid autoplay restrictions
+  document.getElementById('videoWrap').addEventListener('click', async ()=>{
+    if(camStatus.innerText === 'stopped') await startCamera();
+  });
+
+  // Helpful: warn about secure context
+  if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
+    log('Rekomendasi: jalankan halaman via HTTPS agar Web Speech & kamera bekerja andal.');
+  }
+
+})();
+</script>
+</body>
+</html>
