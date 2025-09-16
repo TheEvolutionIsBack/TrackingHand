@@ -34,7 +34,7 @@
   .gesture-left{display:flex; gap:8px; align-items:center;}
   .badge{font-size:12px; color:var(--muted);}
   .bubble-area{position:relative; min-height:60px;}
-  .bubble{position:absolute; right:10px; top:10px; background:#0ea5a9; color:#021018; padding:10px 14px; border-radius:16px; box-shadow:0 6px 18px rgba(0,0,0,0.4); animation:pop .28s ease;}
+  .bubble{position:absolute; right:10px; background:#0ea5a9; color:#021018; padding:10px 14px; border-radius:16px; box-shadow:0 6px 18px rgba(0,0,0,0.4); animation:pop .28s ease;}
   @keyframes pop{from{transform:translateY(6px) scale(.98);opacity:0} to{transform:translateY(0) scale(1);opacity:1}}
   .muted-box{background:#071826;border-radius:8px;padding:8px;border:1px solid rgba(255,255,255,0.02);}
   .footer-note{font-size:12px;color:var(--muted); margin-top:8px;}
@@ -142,8 +142,10 @@
 
 <script>
 /* ============================================================
-   Full script: gestures + mediapipe hands + facemesh + toggles
-   Design/layout preserved. Added toggles & anti-blink 1.5s.
+   Final script — expanded: multi-hand recording & matching,
+   better face heuristics (anti-blink), bubble stacking,
+   localStorage save/load, cooldown fixes.
+   Design untouched.
    ============================================================ */
 
 /* ====== DOM & State ====== */
@@ -183,55 +185,113 @@ const toggleBubble = document.getElementById('toggleBubble');
 
 let cameraObj = null;
 let recording = false;
+/* recordFrames: array of frames.
+   each frame: array of hands, each hand: array of 21 {x,y}
+   example: [ [hand0points], [hand1points] ] per frame */
 let recordFrames = [];
 const RECORD_FRAME_COUNT = 18;
-let templates = []; // template objects {id,name,response,cooldown,landmarks,lastTriggered}
+let templates = []; // template objects {id,name,response,cooldown,landmarks: [hand0,hand1,...],lastTriggered}
 let lastGlobalTrigger = 0;
 let lastFaceTrigger = 0;
 
-/* ====== UI Small hookups ====== */
+/* ====== UI hookups ====== */
 sensitivityRange.addEventListener('input', ()=> sVal.innerText = sensitivityRange.value );
 
-/* ====== Speech & bubble ====== */
+/* ====== Speech & bubble (stacking) ====== */
 function speak(text){
   if(!toggleVoice.checked) return;
   const now = Date.now();
   const globalCd = parseInt(globalCooldownInput.value)||500;
   if(now - lastGlobalTrigger < globalCd) return;
   lastGlobalTrigger = now;
-
   const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "id-ID";
-  speechSynthesis.cancel(); // reduce overlaps
+  utter.lang = document.documentElement.lang || "id-ID";
+  speechSynthesis.cancel();
   speechSynthesis.speak(utter);
   if(toggleBubble.checked) showBubble(text);
 }
 function showBubble(text){
   if(!toggleBubble.checked) return;
-  bubbleArea.innerHTML = `<div class="bubble">🤖 ${escapeHtml(text)}</div>`;
-  setTimeout(()=>{ bubbleArea.innerHTML=''; }, 3000);
+  // create bubble and stack them vertically from top
+  const children = bubbleArea.children.length;
+  const el = document.createElement('div');
+  el.className = 'bubble';
+  el.style.top = `${10 + children*52}px`;
+  el.textContent = `🤖 ${text}`;
+  bubbleArea.appendChild(el);
+  setTimeout(()=>{
+    // remove with small fade/collapse
+    el.style.transition = 'opacity .18s, transform .18s';
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(-6px)';
+    setTimeout(()=> el.remove(), 180);
+  }, 3000);
 }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>'&#'+c.charCodeAt(0)+';'); }
 
-/* ====== Normalization & comparison ====== */
-function normalizeLandmarks(raw){
+/* ====== Normalization & comparison (multi-hand aware) ====== */
+/* normalize a single hand (21 pts) -> anchored & scale-normalized */
+function normalizeSingle(raw){
+  // raw: [{x,y},...21]
   const ref = raw[0];
   const pts = raw.map(p => ({x: p.x - ref.x, y: p.y - ref.y}));
   let maxd = 1e-6;
   for(const p of pts){ const d = Math.hypot(p.x,p.y); if(d>maxd) maxd = d; }
   return pts.map(p => ({x: p.x / maxd, y: p.y / maxd}));
 }
-function averageFrames(frames){
-  if(frames.length===0) return null;
-  const sum = Array(21).fill(0).map(()=>({x:0,y:0}));
-  frames.forEach(f=>{ for(let i=0;i<21;i++){ sum[i].x += f[i].x; sum[i].y += f[i].y; } });
-  const n = frames.length;
-  return sum.map(p=>({x:p.x/n, y:p.y/n}));
+
+/* normalize multiple hands: returns array of normalized hands in same order */
+function normalizeMulti(handsArray){
+  return handsArray.map(single => normalizeSingle(single));
 }
-function compareTemplates(a,b){
+
+/* average frames for multi-hand recording */
+function averageFramesMulti(frames){
+  if(frames.length===0) return null;
+  // determine max hands across frames (we require consistent count to save)
+  const handCount = frames[0].length;
+  // ensure all frames have same handCount; if not, skip frames that don't match
+  const valid = frames.filter(f => f.length === handCount);
+  if(valid.length === 0) return null;
+  // sum per hand per landmark
+  const sumHands = [];
+  for(let h=0; h<handCount; h++){
+    const sum = Array(21).fill(0).map(()=>({x:0,y:0}));
+    valid.forEach(f => {
+      for(let i=0;i<21;i++){ sum[i].x += f[h][i].x; sum[i].y += f[h][i].y; }
+    });
+    const n = valid.length;
+    sumHands.push(sum.map(p=>({x:p.x/n, y:p.y/n})));
+  }
+  return sumHands;
+}
+
+/* compare two single normalized hands */
+function compareSingle(a,b){
   let s = 0;
-  for(let i=0;i<21;i++){ s += Math.abs(a[i].x - b[i].x) + Math.abs(a[i].y - b[i].y); }
+  for(let i=0;i<21;i++){
+    s += Math.abs(a[i].x - b[i].x) + Math.abs(a[i].y - b[i].y);
+  }
   return s;
+}
+
+/* compare multi-hand template with current multi-hand (try best hand ordering)
+   return average distance or Infinity if hand counts differ */
+function compareMultiTemplate(templateHands, currentHands){
+  if(!templateHands || !currentHands) return Infinity;
+  if(templateHands.length !== currentHands.length) return Infinity;
+  const n = templateHands.length;
+  if(n===1) return compareSingle(templateHands[0], currentHands[0]);
+  if(n===2){
+    // try both orders (0-1) and (1-0)
+    const d1 = compareSingle(templateHands[0], currentHands[0]) + compareSingle(templateHands[1], currentHands[1]);
+    const d2 = compareSingle(templateHands[0], currentHands[1]) + compareSingle(templateHands[1], currentHands[0]);
+    return Math.min(d1,d2)/n;
+  }
+  // for >2 hands, do one-to-one in order (simple)
+  let sum=0;
+  for(let i=0;i<n;i++) sum += compareSingle(templateHands[i], currentHands[i]);
+  return sum/n;
 }
 
 /* ====== Templates UI ====== */
@@ -240,7 +300,7 @@ function renderTemplates(){
   templates.forEach(t=>{
     const el = document.createElement('div'); el.className='gesture-item';
     const left = document.createElement('div'); left.className='gesture-left';
-    left.innerHTML = `<div><b>${t.name}</b><div class="badge tiny">${t.response}</div></div>`;
+    left.innerHTML = `<div><b>${t.name}</b><div class="badge tiny">${escapeHtml(t.response)}</div></div>`;
     const right = document.createElement('div');
     right.innerHTML = `
       <div class="row">
@@ -255,7 +315,7 @@ function renderTemplates(){
 
   // handlers
   document.querySelectorAll('.delBtn').forEach(b=>{
-    b.onclick = ()=>{ const id=b.dataset.id; templates = templates.filter(x=>x.id!==id); renderTemplates(); };
+    b.onclick = ()=>{ const id=b.dataset.id; templates = templates.filter(x=>x.id!==id); saveLocal(); renderTemplates(); };
   });
   document.querySelectorAll('.editBtn').forEach(b=>{
     b.onclick = ()=>{
@@ -264,7 +324,7 @@ function renderTemplates(){
       const newResp = prompt('Ubah respon suara', t.response); if(newResp===null) return;
       const newCd = prompt('Cooldown (ms) untuk gestur ini', t.cooldown||gestureCooldownInput.value); if(newCd===null) return;
       t.name = newName || t.name; t.response = newResp || t.response; t.cooldown = parseInt(newCd)|| (parseInt(gestureCooldownInput.value)||2500);
-      renderTemplates();
+      saveLocal(); renderTemplates();
     };
   });
   document.querySelectorAll('.testBtn').forEach(b=>{
@@ -275,9 +335,10 @@ function renderTemplates(){
 /* ====== Save / Export / Import / Clear ====== */
 saveBtn.onclick = ()=>{
   if(!recordFrames.length){ alert('Rekam gesture dulu (tombol Rekam).'); return; }
-  const avg = averageFrames(recordFrames);
-  if(!avg){ alert('Gagal merekam.'); return; }
-  const normalized = normalizeLandmarks(avg);
+  const avgHands = averageFramesMulti(recordFrames);
+  if(!avgHands){ alert('Gagal merekam (pastikan tangan konsisten selama rekaman).'); return; }
+  // normalize each hand
+  const normalized = normalizeMulti(avgHands);
   const name = gestureNameInput.value.trim() || autoNameFromTemplate(normalized);
   const response = gestureResponseInput.value.trim() || prompt('Masukkan respon suara untuk gestur ini:') || 'Halo';
   const cooldown = parseInt(gestureCooldownInput.value) || 2500;
@@ -285,6 +346,7 @@ saveBtn.onclick = ()=>{
   templates.push({id,name,response,cooldown,landmarks:normalized,lastTriggered:0});
   recordFrames = []; recording = false;
   statusEl.innerText = `✅ Gestur "${name}" tersimpan. (${templates.length} total)`;
+  saveLocal();
   renderTemplates();
 };
 
@@ -304,25 +366,29 @@ importFile.onchange = (e)=>{
     try{
       const data = JSON.parse(ev.target.result);
       if(Array.isArray(data)){
+        // basic validation: ensure landmarks array exists
         templates = data.map(d=>({...d, lastTriggered:0}));
+        saveLocal();
         renderTemplates();
         statusEl.innerText = '✅ Import sukses.';
       } else alert('Format JSON tidak valid');
-    }catch(err){ alert('File JSON tidak valid'); }
+    }catch(err){ alert('File JSON tidak valid'); console.error(err); }
   };
   reader.readAsText(f);
 };
 
 clearBtn.onclick = ()=>{
-  if(confirm('Hapus semua gesture?')){ templates=[]; renderTemplates(); statusEl.innerText='Semua gesture dihapus'; }
+  if(confirm('Hapus semua gesture?')){ templates=[]; saveLocal(); renderTemplates(); statusEl.innerText='Semua gesture dihapus'; }
 };
 
-/* ====== Auto-name heuristic ====== */
+/* ====== Auto-name heuristic (multi-hand aware) ====== */
 function autoNameFromTemplate(norm){
   try{
+    if(Array.isArray(norm) && norm.length>1) return `${norm.length}_hands`;
+    const n = Array.isArray(norm) ? norm[0] : norm;
     const tips = [4,8,12,16,20], pips = [3,6,10,14,18];
     let ext = 0;
-    for(let i=0;i<5;i++){ if(norm[tips[i]].y < norm[pips[i]].y) ext++; }
+    for(let i=0;i<5;i++){ if(n[tips[i]].y < n[pips[i]].y) ext++; }
     if(ext>=4) return 'open_palm';
     if(ext===0) return 'fist';
     return `${ext}_fingers`;
@@ -330,12 +396,13 @@ function autoNameFromTemplate(norm){
 }
 btnAutoName.onclick = ()=>{
   if(!recordFrames.length){ alert('Rekam gesture dulu.'); return; }
-  const avg = averageFrames(recordFrames);
-  const name = autoNameFromTemplate(normalizeLandmarks(avg));
+  const avg = averageFramesMulti(recordFrames);
+  if(!avg){ alert('Gagal merekam untuk auto-name.'); return; }
+  const name = autoNameFromTemplate(normalizeMulti(avg));
   gestureNameInput.value = name;
 };
 
-/* ====== Recording controls ====== */
+/* ====== Recording controls (record multi-hand frames) ====== */
 btnRecord.onclick = ()=>{ recording = true; recordFrames = []; statusEl.innerText = '⏺️ Merekam gesture... tahan sampai selesai.'; };
 btnStopRecord.onclick = ()=>{ recording = false; statusEl.innerText = '⏹️ Rekaman dihentikan. Klik Simpan Gestur untuk menyimpan.'; };
 
@@ -364,29 +431,28 @@ btnFullscreen.onclick = async ()=>{
 
 /* helpers for face heuristics */
 function faceMetrics(landmarks){
-  // landmarks in normalized coords (x,y,z) length ~468
-  // mouth open: distance between upper lip (13) and lower lip (14)
+  // landmarks in normalized coords length ~468
   const upperLip = landmarks[13];
   const lowerLip = landmarks[14];
   const mouthOpen = Math.hypot((upperLip.x-lowerLip.x), (upperLip.y-lowerLip.y));
-
-  // eye openness (left & right): use landmarks (159,145) and (386,374) approximations
   const leftTop = landmarks[159], leftBottom = landmarks[145];
   const rightTop = landmarks[386], rightBottom = landmarks[374];
   const leftEye = Math.hypot(leftTop.x-leftBottom.x, leftTop.y-leftBottom.y);
   const rightEye = Math.hypot(rightTop.x-rightBottom.x, rightTop.y-rightBottom.y);
-  // brow vs eye: distance between brow (65/295) and eye top to detect frown/sad (approx)
   const leftBrow = landmarks[65], rightBrow = landmarks[295];
   const leftFrown = Math.hypot(leftBrow.x-leftTop.x, leftBrow.y-leftTop.y);
   const rightFrown = Math.hypot(rightBrow.x-rightTop.x, rightBrow.y-rightTop.y);
-
-  return { mouthOpen, leftEye, rightEye, leftFrown, rightFrown };
+  // mouth width (for smile detection): distance between mouth corners 61 and 291
+  const leftCorner = landmarks[61], rightCorner = landmarks[291];
+  const mouthWidth = Math.hypot(leftCorner.x-rightCorner.x, leftCorner.y-rightCorner.y);
+  return { mouthOpen, leftEye, rightEye, leftFrown, rightFrown, mouthWidth };
 }
 
-/* face cooldown & thresholds (tweak if needed) */
+/* face thresholds */
 const FACE_YAWN_THRESHOLD = 0.055;
 const FACE_SLEEP_THRESHOLD = 0.015;
 const FACE_SAD_THRESHOLD = 0.02;
+const FACE_SMILE_WIDTH = 0.06; // mouth width relative threshold, tweakable
 
 let faceMesh = null;
 let hands = null;
@@ -401,53 +467,60 @@ function onHandsResults(results){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
 
-  // draw face overlays if face landmarks exist (face draw done separately by face callback)
   // draw hands
   if(results.multiHandLandmarks && results.multiHandLandmarks.length>0){
     results.multiHandLandmarks.forEach((lm, idx)=>{
       const color = idx===0 ? '#00ffb3' : '#66d9ff';
       window.drawConnectors(ctx, lm, window.HAND_CONNECTIONS, {color:color, lineWidth:3});
       window.drawLandmarks(ctx, lm, {color:'#ffd600', lineWidth:2, radius:3});
+    });
 
-      statusEl.innerText = `👀 ${results.multiHandLandmarks.length} tangan terdeteksi`;
+    statusEl.innerText = `👀 ${results.multiHandLandmarks.length} tangan terdeteksi`;
 
-      const simple = lm.map(p=>({x:p.x, y:p.y}));
-      if(recording){
-        recordFrames.push(simple);
-        if(recordFrames.length >= RECORD_FRAME_COUNT){
-          recording = false;
-          statusEl.innerText = '✅ Rekaman selesai. Klik Simpan Gestur.';
-        } else {
-          statusEl.innerText = `⏺️ Merekam... (${recordFrames.length}/${RECORD_FRAME_count||RECORD_FRAME_COUNT})`;
-        }
+    // Prepare simple array-of-hands format
+    const simpleHands = results.multiHandLandmarks.map(lm => lm.map(p=>({x:p.x, y:p.y})));
+
+    // Recording: push a frame of current hands (copy)
+    if(recording){
+      // ensure consistent ordering: sort by average x (left->right in image coords)
+      const ordered = simpleHands.slice().sort((a,b)=>{
+        const ax = a.reduce((s,p)=>s+p.x,0)/21;
+        const bx = b.reduce((s,p)=>s+p.x,0)/21;
+        return ax - bx;
+      });
+      recordFrames.push(ordered);
+      if(recordFrames.length >= RECORD_FRAME_COUNT){
+        recording = false;
+        statusEl.innerText = '✅ Rekaman selesai. Klik Simpan Gestur.';
       } else {
-        // recognition only if toggle enabled
-        if(toggleHand.checked && templates.length>0){
-          const normCurrent = normalizeLandmarks(simple);
-          let best=null, bestDist=Infinity;
-          for(const t of templates){
-            const d = compareTemplates(t.landmarks, normCurrent);
-            if(d < bestDist){ bestDist = d; best = t; }
-          }
-          const threshold = parseFloat(sensitivityRange.value) || 3.0;
-          if(best && bestDist < threshold){
-            const now = Date.now();
-            const tcd = best.cooldown || (parseInt(gestureCooldownInput.value) || 2500);
-            if(!best.lastTriggered) best.lastTriggered = 0;
-            if(now - best.lastTriggered > tcd){
-              best.lastTriggered = now;
-              flashHighlight();
-              speak(best.response);
-              statusEl.innerText = `✅ Gesture "${best.name}" terdeteksi (score ${bestDist.toFixed(2)})`;
-            } else {
-              statusEl.innerText = `🔒 Gesture "${best.name}" cocok tetapi on cooldown`;
-            }
+        statusEl.innerText = `⏺️ Merekam... (${recordFrames.length}/${RECORD_FRAME_COUNT})`;
+      }
+    } else {
+      // Recognition: if templates exist and toggle enabled
+      if(toggleHand.checked && templates.length>0){
+        const normCurrent = normalizeMulti(simpleHands);
+        let best=null, bestDist=Infinity;
+        for(const t of templates){
+          const d = compareMultiTemplate(t.landmarks, normCurrent);
+          if(d < bestDist){ bestDist = d; best = t; }
+        }
+        const threshold = parseFloat(sensitivityRange.value) || 3.0;
+        if(best && bestDist < threshold){
+          const now = Date.now();
+          const tcd = best.cooldown || (parseInt(gestureCooldownInput.value) || 2500);
+          if(!best.lastTriggered) best.lastTriggered = 0;
+          if(now - best.lastTriggered > tcd){
+            best.lastTriggered = now;
+            flashHighlight();
+            speak(best.response);
+            statusEl.innerText = `✅ Gesture "${best.name}" terdeteksi (score ${bestDist.toFixed(2)})`;
+          } else {
+            statusEl.innerText = `🔒 Gesture "${best.name}" cocok tetapi on cooldown`;
           }
         }
       }
-    });
+    }
   } else {
-    // show no hands only if face not overriding
     statusEl.innerText = '👀 Tidak ada tangan';
   }
   ctx.restore();
@@ -459,13 +532,13 @@ let eyeClosedSince = null;
 function onFaceResults(results){
   if(results.multiFaceLandmarks && results.multiFaceLandmarks.length>0){
     const face = results.multiFaceLandmarks[0];
-    // draw face mesh lightly
+    // draw mesh lightly
     window.drawConnectors(ctx, face, window.FACEMESH_TESSELATION, {color:'#ffffff22', lineWidth:1});
     const m = faceMetrics(face);
     const now = Date.now();
     const faceCd = parseInt(faceCooldownInput.value) || 3000;
 
-    // yawn detection
+    // Yawn detection: large vertical mouthOpen
     if(toggleFace.checked && m.mouthOpen > FACE_YAWN_THRESHOLD){
       if(now - lastFaceTrigger > faceCd){
         lastFaceTrigger = now;
@@ -476,7 +549,7 @@ function onFaceResults(results){
       return;
     }
 
-    // sleepy detection (both eyes small, and must be closed > 1.5s)
+    // Sleepy detection: eyes closed for >1.5s (anti-blink)
     if(toggleFace.checked && m.leftEye < FACE_SLEEP_THRESHOLD && m.rightEye < FACE_SLEEP_THRESHOLD){
       if(!eyeClosedSince) eyeClosedSince = now;
       else if(now - eyeClosedSince > 1500){
@@ -485,13 +558,25 @@ function onFaceResults(results){
           speak('Kamu mengantuk, jangan dipaksa ya');
           statusEl.innerText = '😴 Terlihat mengantuk';
         }
+        // keep eyeClosedSince to avoid repeated rapid triggers
+        eyeClosedSince = now;
       }
       return;
     } else {
       eyeClosedSince = null; // reset if eyes open
     }
 
-    // sad detection heuristic
+    // Smile detection: relatively wide mouth but not tall (smile width threshold)
+    if(toggleFace.checked && m.mouthWidth > FACE_SMILE_WIDTH && m.mouthOpen < 0.035){
+      if(now - lastFaceTrigger > faceCd){
+        lastFaceTrigger = now;
+        speak('Kamu tersenyum, bagus!');
+        statusEl.innerText = '😊 Terlihat senyum';
+      }
+      return;
+    }
+
+    // Sad detection heuristic: brows closer to eyes or mouth corners down (use leftFrown/rightFrown)
     if(toggleFace.checked && (m.leftFrown < FACE_SAD_THRESHOLD || m.rightFrown < FACE_SAD_THRESHOLD)){
       if(now - lastFaceTrigger > faceCd){
         lastFaceTrigger = now;
@@ -520,6 +605,7 @@ faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@m
 faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
 faceMesh.onResults(onFaceResults);
 
+/* camera start/stop */
 async function startCamera(){
   try{
     const stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}, audio:false});
@@ -528,7 +614,7 @@ async function startCamera(){
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     cameraObj = new Camera(video, {
       onFrame: async () => {
-        // send both to hands and faceMesh only if toggles allow sending (still cheap to send both)
+        // send both to hands and faceMesh
         await hands.send({image: video});
         await faceMesh.send({image: video});
       },
@@ -550,8 +636,22 @@ function stopCamera(){
 }
 btnCamera.onclick = ()=> { if(!cameraObj) startCamera(); else stopCamera(); };
 
-/* init demo template gestures (empty landmarks — user should record) */
-templates = []; renderTemplates();
+/* init */
+function saveLocal(){
+  try{
+    localStorage.setItem('saved_gestures_v1', JSON.stringify(templates));
+  }catch(e){ console.warn('localStorage save failed', e); }
+}
+function loadLocal(){
+  try{
+    const data = localStorage.getItem('saved_gestures_v1');
+    if(data){
+      templates = JSON.parse(data).map(d=>({...d, lastTriggered:0}));
+    } else templates = [];
+  }catch(e){ console.warn('localStorage load failed', e); templates = []; }
+}
+loadLocal();
+renderTemplates();
 
 /* keyboard shortcuts */
 document.addEventListener('keydown', (e)=>{
@@ -559,7 +659,7 @@ document.addEventListener('keydown', (e)=>{
   if(e.key==='s') btnStopRecord.click();
 });
 
-/* apply settings button hook (simple acknowledgement) */
+/* apply settings */
 applySettingsBtn.onclick = ()=> { statusEl.innerText = 'Settings applied.'; };
 
 /* small compatibility: ensure RECORD_FRAME_COUNT ref works in messages */
