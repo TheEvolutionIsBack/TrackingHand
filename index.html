@@ -1,154 +1,133 @@
-<!doctype html>
-<html lang="id">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Hand Tracking + Voice Gestures</title>
-  <style>
-    body{margin:0;background:#0f1724;color:#e6eef6;font-family:sans-serif;display:flex;justify-content:center;padding:20px;}
-    .app{max-width:1000px;width:100%;display:grid;grid-template-columns: 640px 1fr;gap:16px;}
-    .card{background:#1a2336;border-radius:10px;padding:12px;}
-    .video-wrap{position:relative;border-radius:10px;overflow:hidden;background:#000;height:480px;}
-    video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
-    canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;transform:scaleX(-1);}
-    h2{margin-top:0;}
-    ul{padding-left:18px;}
-    input,button{padding:6px 10px;margin:4px 0;}
-    button{cursor:pointer;border-radius:6px;border:none;}
-    .primary{background:#06b6d4;color:#021018;font-weight:bold;}
-  </style>
+  <meta charset="UTF-8">
+  <title>Hand Tracking Voice Bot</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <style>
+    body { text-align:center; background:#111; color:#eee; font-family:sans-serif; }
+    video, canvas { border:2px solid #444; margin:10px; }
+    #controls { margin-top:20px; }
+    button { padding:10px 20px; margin:5px; }
+  </style>
 </head>
 <body>
-<div class="app">
-  <div class="card">
-    <div class="video-wrap">
-      <video id="video" autoplay playsinline></video>
-      <canvas id="canvas"></canvas>
-    </div>
-    <p>Gesture terdeteksi: <b id="gesture">—</b></p>
-    <button class="primary" id="btnCamera">Start Camera</button>
+  <h1>🤖 Hand Tracking Voice Bot</h1>
+  <video id="input_video" autoplay playsinline style="display:none;"></video>
+  <canvas id="output_canvas" width="640" height="480"></canvas>
+  <div id="controls">
+    <button onclick="startRecordGesture()">🎥 Rekam Gestur Baru</button>
+    <input id="gestureName" placeholder="Nama gestur">
+    <input id="gestureResponse" placeholder="Respon suara bot">
+    <button onclick="saveGesture()">💾 Simpan Gestur</button>
   </div>
-
-  <div class="card">
-    <h2>Daftar Gesture</h2>
-    <ul id="gestureList"></ul>
-
-    <h3>Tambah Gesture Baru</h3>
-    <p><i>Format gesture harus sudah ada di kode deteksi (misalnya: one_finger, two_fingers, dll.)</i></p>
-    <input type="text" id="gestureName" placeholder="Nama gesture (contoh: one_finger)" style="width:100%"><br/>
-    <input type="text" id="gestureResponse" placeholder="Respon suara (contoh: Halo!)" style="width:100%"><br/>
-    <button id="addGesture">Tambah Gesture</button>
-  </div>
-</div>
+  <p id="status">Status: Menunggu...</p>
 
 <script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const gestureLabel = document.getElementById("gesture");
-const btnCamera = document.getElementById("btnCamera");
-const gestureList = document.getElementById("gestureList");
+  const videoElement = document.getElementById('input_video');
+  const canvasElement = document.getElementById('output_canvas');
+  const canvasCtx = canvasElement.getContext('2d');
+  const statusEl = document.getElementById('status');
 
-// Mapping gesture -> respon suara
-let gestureResponses = {
-  "open_palm": "Halo",
-  "one_finger": "Kalp",
-  "two_fingers": "Nama",
-  "thumbs_up": "Bagus"
-};
+  let recording = false;
+  let tempGesture = null;
+  let customGestures = []; // {name, response, landmarks}
+  let lastSpoken = 0;
+  const cooldown = 2500; // 2.5 detik
 
-// Render daftar gesture
-function renderGestureList(){
-  gestureList.innerHTML = "";
-  Object.entries(gestureResponses).forEach(([g,res])=>{
-    const li = document.createElement("li");
-    li.textContent = `${g} → "${res}"`;
-    gestureList.appendChild(li);
-  });
-}
-renderGestureList();
-
-// Fungsi bicara
-function speak(text){
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "id-ID";
-  speechSynthesis.speak(utter);
-}
-
-// Gesture detection sederhana
-function detectGesture(landmarks){
-  const tips = [4,8,12,16,20];
-  const pips = [3,6,10,14,18];
-  const ext = [];
-  for(let i=0;i<5;i++){
-    const tip=landmarks[tips[i]], pip=landmarks[pips[i]];
-    ext[i]= tip && pip ? tip.y < pip.y : false;
+  function speak(text){
+    const now = Date.now();
+    if (now - lastSpoken < cooldown) return; // cegah spam
+    lastSpoken = now;
+    let utter = new SpeechSynthesisUtterance(text);
+    speechSynthesis.speak(utter);
   }
-  const count = ext.filter(Boolean).length;
-  if(count>=4) return "open_palm";
-  if(ext[0] && !ext[1]&&!ext[2]&&!ext[3]&&!ext[4]) return "thumbs_up";
-  if(ext[1] && !ext[0]&&!ext[2]&&!ext[3]&&!ext[4]) return "one_finger";
-  if(ext[1]&&ext[2] && !ext[0]&&!ext[3]&&!ext[4]) return "two_fingers";
-  return "unknown";
-}
 
-// MediaPipe setup
-const hands = new Hands({locateFile:(f)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:0.7,minTrackingConfidence:0.6});
-hands.onResults(onResults);
+  function startRecordGesture(){
+    recording = true;
+    statusEl.textContent = "Status: Angkat tangan dan tahan untuk merekam gestur...";
+  }
 
-let camera = null;
-async function startCamera(){
-  if(camera) return;
-  const stream = await navigator.mediaDevices.getUserMedia({video:true});
-  video.srcObject = stream;
-  await video.play();
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  camera = new Camera(video,{onFrame:async()=>{await hands.send({image:video});},width:640,height:480});
-  camera.start();
-  btnCamera.textContent="Stop Camera";
-}
-function stopCamera(){
-  if(camera){camera.stop();camera=null;}
-  if(video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop());video.srcObject=null;}
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  btnCamera.textContent="Start Camera";
-}
-btnCamera.onclick=()=>{if(camera)stopCamera();else startCamera();};
-
-// Handle hasil
-let lastGesture="";
-function onResults(results){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(results.multiHandLandmarks && results.multiHandLandmarks.length>0){
-    const lm = results.multiHandLandmarks[0];
-    window.drawConnectors(ctx,lm,window.HAND_CONNECTIONS,{color:"#0ff",lineWidth:3});
-    window.drawLandmarks(ctx,lm,{color:"#ff0",lineWidth:2});
-    const g=detectGesture(lm);
-    gestureLabel.textContent=g;
-    if(g!==lastGesture && g!=="unknown"){
-      lastGesture=g;
-      if(gestureResponses[g]) speak(gestureResponses[g]);
+  function saveGesture(){
+    const name = document.getElementById("gestureName").value;
+    const response = document.getElementById("gestureResponse").value;
+    if(tempGesture && name && response){
+      customGestures.push({ name, response, landmarks: tempGesture });
+      statusEl.textContent = `✅ Gestur "${name}" disimpan dengan respon "${response}"`;
+      recording = false;
+      tempGesture = null;
+    } else {
+      alert("Rekam gestur dulu, lalu isi nama dan respon!");
     }
-  }else{
-    gestureLabel.textContent="—";
-    lastGesture="";
   }
-}
 
-// Tambah gesture custom
-document.getElementById("addGesture").onclick=()=>{
-  const g=document.getElementById("gestureName").value.trim();
-  const r=document.getElementById("gestureResponse").value.trim();
-  if(!g||!r) return alert("Isi nama gesture dan respon!");
-  gestureResponses[g]=r;
-  renderGestureList();
-  alert(`Gesture "${g}" ditambahkan dengan respon "${r}"`);
-};
+  function compareGestures(g1, g2){
+    if(!g1 || !g2) return Infinity;
+    let sum = 0;
+    for(let i=0;i<g1.length;i++){
+      sum += Math.abs(g1[i].x - g2[i].x) + Math.abs(g1[i].y - g2[i].y);
+    }
+    return sum;
+  }
+
+  function onResults(results) {
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const landmarks = results.multiHandLandmarks[0];
+      // gambar tangan
+      for (let lm of landmarks){
+        canvasCtx.beginPath();
+        canvasCtx.arc(lm.x*canvasElement.width, lm.y*canvasElement.height, 5, 0, 2*Math.PI);
+        canvasCtx.fillStyle = "lime";
+        canvasCtx.fill();
+      }
+
+      if(recording){
+        tempGesture = landmarks.map(lm=>({x:lm.x, y:lm.y}));
+        statusEl.textContent = "✅ Gestur direkam! Isi nama & respon lalu klik Simpan.";
+      } else {
+        // deteksi gestur terdekat
+        if(customGestures.length > 0){
+          let current = landmarks.map(lm=>({x:lm.x,y:lm.y}));
+          let best = null, minDist=Infinity;
+          for(let g of customGestures){
+            let d = compareGestures(g.landmarks, current);
+            if(d < minDist){ minDist=d; best=g; }
+          }
+          if(best && minDist < 3.0){ // threshold akurasi
+            speak(best.response);
+            statusEl.textContent = `👉 Gestur terdeteksi: ${best.name}`;
+          }
+        }
+      }
+    }
+    canvasCtx.restore();
+  }
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+  hands.onResults(onResults);
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => { await hands.send({image: videoElement}); },
+    width: 640,
+    height: 480
+  });
+  camera.start();
 </script>
 </body>
 </html>
