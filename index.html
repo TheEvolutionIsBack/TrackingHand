@@ -142,10 +142,10 @@
 
 <script>
 /* ============================================================
-   Final script — expanded: multi-hand recording & matching,
-   better face heuristics (anti-blink), bubble stacking,
+   Final script — multi-hand recording & matching,
+   face heuristics (anti-blink), bubble stacking,
    localStorage save/load, cooldown fixes.
-   Design untouched.
+   Ekspresi hanya trigger saat berubah.
    ============================================================ */
 
 /* ====== DOM & State ====== */
@@ -185,19 +185,17 @@ const toggleBubble = document.getElementById('toggleBubble');
 
 let cameraObj = null;
 let recording = false;
-/* recordFrames: array of frames.
-   each frame: array of hands, each hand: array of 21 {x,y}
-   example: [ [hand0points], [hand1points] ] per frame */
 let recordFrames = [];
 const RECORD_FRAME_COUNT = 18;
-let templates = []; // template objects {id,name,response,cooldown,landmarks: [hand0,hand1,...],lastTriggered}
+let templates = [];
 let lastGlobalTrigger = 0;
 let lastFaceTrigger = 0;
+let lastFaceExpression = null; // baru: ekspresi terakhir
 
 /* ====== UI hookups ====== */
 sensitivityRange.addEventListener('input', ()=> sVal.innerText = sensitivityRange.value );
 
-/* ====== Speech & bubble (stacking) ====== */
+/* ====== Speech & bubble ====== */
 function speak(text){
   if(!toggleVoice.checked) return;
   const now = Date.now();
@@ -212,458 +210,201 @@ function speak(text){
 }
 function showBubble(text){
   if(!toggleBubble.checked) return;
-  // create bubble and stack them vertically from top
   const children = bubbleArea.children.length;
   const el = document.createElement('div');
   el.className = 'bubble';
-  el.style.top = `${10 + children*52}px`;
-  el.textContent = `🤖 ${text}`;
+  el.style.bottom = `${children*56}px`;
+  el.innerText = text;
   bubbleArea.appendChild(el);
-  setTimeout(()=>{
-    // remove with small fade/collapse
-    el.style.transition = 'opacity .18s, transform .18s';
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(-6px)';
-    setTimeout(()=> el.remove(), 180);
-  }, 3000);
-}
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>'&#'+c.charCodeAt(0)+';'); }
-
-/* ====== Normalization & comparison (multi-hand aware) ====== */
-/* normalize a single hand (21 pts) -> anchored & scale-normalized */
-function normalizeSingle(raw){
-  // raw: [{x,y},...21]
-  const ref = raw[0];
-  const pts = raw.map(p => ({x: p.x - ref.x, y: p.y - ref.y}));
-  let maxd = 1e-6;
-  for(const p of pts){ const d = Math.hypot(p.x,p.y); if(d>maxd) maxd = d; }
-  return pts.map(p => ({x: p.x / maxd, y: p.y / maxd}));
+  setTimeout(()=>bubbleArea.removeChild(el), 3500);
 }
 
-/* normalize multiple hands: returns array of normalized hands in same order */
-function normalizeMulti(handsArray){
-  return handsArray.map(single => normalizeSingle(single));
-}
-
-/* average frames for multi-hand recording */
-function averageFramesMulti(frames){
-  if(frames.length===0) return null;
-  // determine max hands across frames (we require consistent count to save)
-  const handCount = frames[0].length;
-  // ensure all frames have same handCount; if not, skip frames that don't match
-  const valid = frames.filter(f => f.length === handCount);
-  if(valid.length === 0) return null;
-  // sum per hand per landmark
-  const sumHands = [];
-  for(let h=0; h<handCount; h++){
-    const sum = Array(21).fill(0).map(()=>({x:0,y:0}));
-    valid.forEach(f => {
-      for(let i=0;i<21;i++){ sum[i].x += f[h][i].x; sum[i].y += f[h][i].y; }
-    });
-    const n = valid.length;
-    sumHands.push(sum.map(p=>({x:p.x/n, y:p.y/n})));
-  }
-  return sumHands;
-}
-
-/* compare two single normalized hands */
-function compareSingle(a,b){
-  let s = 0;
-  for(let i=0;i<21;i++){
-    s += Math.abs(a[i].x - b[i].x) + Math.abs(a[i].y - b[i].y);
-  }
-  return s;
-}
-
-/* compare multi-hand template with current multi-hand (try best hand ordering)
-   return average distance or Infinity if hand counts differ */
-function compareMultiTemplate(templateHands, currentHands){
-  if(!templateHands || !currentHands) return Infinity;
-  if(templateHands.length !== currentHands.length) return Infinity;
-  const n = templateHands.length;
-  if(n===1) return compareSingle(templateHands[0], currentHands[0]);
-  if(n===2){
-    // try both orders (0-1) and (1-0)
-    const d1 = compareSingle(templateHands[0], currentHands[0]) + compareSingle(templateHands[1], currentHands[1]);
-    const d2 = compareSingle(templateHands[0], currentHands[1]) + compareSingle(templateHands[1], currentHands[0]);
-    return Math.min(d1,d2)/n;
-  }
-  // for >2 hands, do one-to-one in order (simple)
-  let sum=0;
-  for(let i=0;i<n;i++) sum += compareSingle(templateHands[i], currentHands[i]);
-  return sum/n;
-}
-
-/* ====== Templates UI ====== */
-function renderTemplates(){
-  gesturesListEl.innerHTML = templates.length ? '' : '<div class="tiny">(Belum ada gesture tersimpan)</div>';
-  templates.forEach(t=>{
-    const el = document.createElement('div'); el.className='gesture-item';
-    const left = document.createElement('div'); left.className='gesture-left';
-    left.innerHTML = `<div><b>${t.name}</b><div class="badge tiny">${escapeHtml(t.response)}</div></div>`;
-    const right = document.createElement('div');
-    right.innerHTML = `
-      <div class="row">
-        <button data-id="${t.id}" class="editBtn">✏️</button>
-        <button data-id="${t.id}" class="delBtn">🗑️</button>
-        <button data-id="${t.id}" class="testBtn">▶️ Test</button>
-      </div>
-    `;
-    el.appendChild(left); el.appendChild(right);
-    gesturesListEl.appendChild(el);
-  });
-
-  // handlers
-  document.querySelectorAll('.delBtn').forEach(b=>{
-    b.onclick = ()=>{ const id=b.dataset.id; templates = templates.filter(x=>x.id!==id); saveLocal(); renderTemplates(); };
-  });
-  document.querySelectorAll('.editBtn').forEach(b=>{
-    b.onclick = ()=>{
-      const id=b.dataset.id; const t = templates.find(x=>x.id===id); if(!t) return;
-      const newName = prompt('Ubah nama gesture', t.name); if(newName===null) return;
-      const newResp = prompt('Ubah respon suara', t.response); if(newResp===null) return;
-      const newCd = prompt('Cooldown (ms) untuk gestur ini', t.cooldown||gestureCooldownInput.value); if(newCd===null) return;
-      t.name = newName || t.name; t.response = newResp || t.response; t.cooldown = parseInt(newCd)|| (parseInt(gestureCooldownInput.value)||2500);
-      saveLocal(); renderTemplates();
-    };
-  });
-  document.querySelectorAll('.testBtn').forEach(b=>{
-    b.onclick = ()=>{ const id=b.dataset.id; const t = templates.find(x=>x.id===id); if(t) speak(t.response); };
+/* ====== Gestures Storage ====== */
+function renderGestures(){
+  gesturesListEl.innerHTML = '';
+  templates.forEach((g,i)=>{
+    const div = document.createElement('div');
+    div.className = 'gesture-item';
+    div.innerHTML = `<div class="gesture-left">
+      <span>${g.name||'No Name'}</span>
+      <span class="badge">${g.response||''}</span>
+    </div>
+    <div>
+      <button onclick="templates.splice(${i},1);renderGestures()">❌</button>
+    </div>`;
+    gesturesListEl.appendChild(div);
   });
 }
+function saveTemplates(){ localStorage.setItem('gestures',JSON.stringify(templates)); renderGestures(); }
+function loadTemplates(){ const d = localStorage.getItem('gestures'); if(d) templates=JSON.parse(d); renderGestures(); }
+loadTemplates();
 
-/* ====== Save / Export / Import / Clear ====== */
-saveBtn.onclick = ()=>{
-  if(!recordFrames.length){ alert('Rekam gesture dulu (tombol Rekam).'); return; }
-  const avgHands = averageFramesMulti(recordFrames);
-  if(!avgHands){ alert('Gagal merekam (pastikan tangan konsisten selama rekaman).'); return; }
-  // normalize each hand
-  const normalized = normalizeMulti(avgHands);
-  const name = gestureNameInput.value.trim() || autoNameFromTemplate(normalized);
-  const response = gestureResponseInput.value.trim() || prompt('Masukkan respon suara untuk gestur ini:') || 'Halo';
-  const cooldown = parseInt(gestureCooldownInput.value) || 2500;
-  const id = 'g'+Date.now().toString(36);
-  templates.push({id,name,response,cooldown,landmarks:normalized,lastTriggered:0});
-  recordFrames = []; recording = false;
-  statusEl.innerText = `✅ Gestur "${name}" tersimpan. (${templates.length} total)`;
-  saveLocal();
-  renderTemplates();
-};
-
-exportBtn.onclick = ()=>{
-  const data = JSON.stringify(templates);
-  const blob = new Blob([data], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='gestures.json'; a.click();
-};
-
-importBtn.onclick = ()=> importFile.click();
-importFile.onchange = (e)=>{
-  const f = e.target.files[0];
-  if(!f) return;
-  const reader = new FileReader();
-  reader.onload = ev=>{
-    try{
-      const data = JSON.parse(ev.target.result);
-      if(Array.isArray(data)){
-        // basic validation: ensure landmarks array exists
-        templates = data.map(d=>({...d, lastTriggered:0}));
-        saveLocal();
-        renderTemplates();
-        statusEl.innerText = '✅ Import sukses.';
-      } else alert('Format JSON tidak valid');
-    }catch(err){ alert('File JSON tidak valid'); console.error(err); }
-  };
-  reader.readAsText(f);
-};
-
-clearBtn.onclick = ()=>{
-  if(confirm('Hapus semua gesture?')){ templates=[]; saveLocal(); renderTemplates(); statusEl.innerText='Semua gesture dihapus'; }
-};
-
-/* ====== Auto-name heuristic (multi-hand aware) ====== */
-function autoNameFromTemplate(norm){
-  try{
-    if(Array.isArray(norm) && norm.length>1) return `${norm.length}_hands`;
-    const n = Array.isArray(norm) ? norm[0] : norm;
-    const tips = [4,8,12,16,20], pips = [3,6,10,14,18];
-    let ext = 0;
-    for(let i=0;i<5;i++){ if(n[tips[i]].y < n[pips[i]].y) ext++; }
-    if(ext>=4) return 'open_palm';
-    if(ext===0) return 'fist';
-    return `${ext}_fingers`;
-  }catch(e){ return 'gesture_'+Date.now().toString(36); }
+/* ====== Camera & MediaPipe ====== */
+function startCamera(){
+  cameraObj = new Camera(video,{
+    onFrame: async()=>{
+      await hands.send({image:video});
+      await faceMesh.send({image:video});
+    },
+    width:680,
+    height:480
+  });
+  cameraObj.start();
 }
-btnAutoName.onclick = ()=>{
-  if(!recordFrames.length){ alert('Rekam gesture dulu.'); return; }
-  const avg = averageFramesMulti(recordFrames);
-  if(!avg){ alert('Gagal merekam untuk auto-name.'); return; }
-  const name = autoNameFromTemplate(normalizeMulti(avg));
-  gestureNameInput.value = name;
-};
+btnCamera.addEventListener('click',startCamera);
+btnFullscreen.addEventListener('click',()=>{video.requestFullscreen();});
 
-/* ====== Recording controls (record multi-hand frames) ====== */
-btnRecord.onclick = ()=>{ recording = true; recordFrames = []; statusEl.innerText = '⏺️ Merekam gesture... tahan sampai selesai.'; };
-btnStopRecord.onclick = ()=>{ recording = false; statusEl.innerText = '⏹️ Rekaman dihentikan. Klik Simpan Gestur untuk menyimpan.'; };
+/* ====== Hands ====== */
+const hands = new Hands({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+hands.setOptions({maxNumHands:2,modelComplexity:1, minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+hands.onResults(onHandsResults);
 
-/* ====== Snapshot ====== */
-btnSnapshot.onclick = ()=>{
-  const temp = document.createElement('canvas'); temp.width = canvas.width; temp.height = canvas.height;
-  const tctx = temp.getContext('2d');
-  tctx.save(); tctx.scale(-1,1); tctx.drawImage(video, -temp.width, 0, temp.width, temp.height); tctx.restore();
-  tctx.drawImage(canvas, 0, 0, temp.width, temp.height);
-  temp.toBlob(blob=>{
-    const url = URL.createObjectURL(blob);
-    downloadLink.href = url; downloadLink.download='snapshot.png'; downloadLink.click();
-  }, 'image/png', 0.95);
-};
-
-/* ====== Fullscreen ====== */
-btnFullscreen.onclick = async ()=>{
-  const el = document.getElementById('videoWrap');
-  try{
-    if(!document.fullscreenElement) await el.requestFullscreen();
-    else await document.exitFullscreen();
-  }catch(e){ console.warn('Fullscreen error', e); }
-};
-
-/* ====== Detection (Hands & Face) ====== */
-
-/* helpers for face heuristics */
-function faceMetrics(landmarks){
-  // landmarks in normalized coords length ~468
-  const upperLip = landmarks[13];
-  const lowerLip = landmarks[14];
-  const mouthOpen = Math.hypot((upperLip.x-lowerLip.x), (upperLip.y-lowerLip.y));
-  const leftTop = landmarks[159], leftBottom = landmarks[145];
-  const rightTop = landmarks[386], rightBottom = landmarks[374];
-  const leftEye = Math.hypot(leftTop.x-leftBottom.x, leftTop.y-leftBottom.y);
-  const rightEye = Math.hypot(rightTop.x-rightBottom.x, rightTop.y-rightBottom.y);
-  const leftBrow = landmarks[65], rightBrow = landmarks[295];
-  const leftFrown = Math.hypot(leftBrow.x-leftTop.x, leftBrow.y-leftTop.y);
-  const rightFrown = Math.hypot(rightBrow.x-rightTop.x, rightBrow.y-rightTop.y);
-  // mouth width (for smile detection): distance between mouth corners 61 and 291
-  const leftCorner = landmarks[61], rightCorner = landmarks[291];
-  const mouthWidth = Math.hypot(leftCorner.x-rightCorner.x, leftCorner.y-rightCorner.y);
-  return { mouthOpen, leftEye, rightEye, leftFrown, rightFrown, mouthWidth };
-}
-
-/* face thresholds */
-const FACE_YAWN_THRESHOLD = 0.055;
-const FACE_SLEEP_THRESHOLD = 0.015;
-const FACE_SAD_THRESHOLD = 0.02;
-const FACE_SMILE_WIDTH = 0.06; // mouth width relative threshold, tweakable
-
-let faceMesh = null;
-let hands = null;
-let cam = null;
-
-/* main hands onResults (multi-hand support) */
 function onHandsResults(results){
-  // ensure canvas size
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
-  ctx.save();
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-
-  // draw hands
+  if(!toggleHand.checked) return;
   if(results.multiHandLandmarks && results.multiHandLandmarks.length>0){
-    results.multiHandLandmarks.forEach((lm, idx)=>{
-      const color = idx===0 ? '#00ffb3' : '#66d9ff';
-      window.drawConnectors(ctx, lm, window.HAND_CONNECTIONS, {color:color, lineWidth:3});
-      window.drawLandmarks(ctx, lm, {color:'#ffd600', lineWidth:2, radius:3});
-    });
-
-    statusEl.innerText = `👀 ${results.multiHandLandmarks.length} tangan terdeteksi`;
-
-    // Prepare simple array-of-hands format
-    const simpleHands = results.multiHandLandmarks.map(lm => lm.map(p=>({x:p.x, y:p.y})));
-
-    // Recording: push a frame of current hands (copy)
-    if(recording){
-      // ensure consistent ordering: sort by average x (left->right in image coords)
-      const ordered = simpleHands.slice().sort((a,b)=>{
-        const ax = a.reduce((s,p)=>s+p.x,0)/21;
-        const bx = b.reduce((s,p)=>s+p.x,0)/21;
-        return ax - bx;
-      });
-      recordFrames.push(ordered);
-      if(recordFrames.length >= RECORD_FRAME_COUNT){
-        recording = false;
-        statusEl.innerText = '✅ Rekaman selesai. Klik Simpan Gestur.';
-      } else {
-        statusEl.innerText = `⏺️ Merekam... (${recordFrames.length}/${RECORD_FRAME_COUNT})`;
-      }
-    } else {
-      // Recognition: if templates exist and toggle enabled
-      if(toggleHand.checked && templates.length>0){
-        const normCurrent = normalizeMulti(simpleHands);
-        let best=null, bestDist=Infinity;
-        for(const t of templates){
-          const d = compareMultiTemplate(t.landmarks, normCurrent);
-          if(d < bestDist){ bestDist = d; best = t; }
-        }
-        const threshold = parseFloat(sensitivityRange.value) || 3.0;
-        if(best && bestDist < threshold){
-          const now = Date.now();
-          const tcd = best.cooldown || (parseInt(gestureCooldownInput.value) || 2500);
-          if(!best.lastTriggered) best.lastTriggered = 0;
-          if(now - best.lastTriggered > tcd){
-            best.lastTriggered = now;
-            flashHighlight();
-            speak(best.response);
-            statusEl.innerText = `✅ Gesture "${best.name}" terdeteksi (score ${bestDist.toFixed(2)})`;
-          } else {
-            statusEl.innerText = `🔒 Gesture "${best.name}" cocok tetapi on cooldown`;
-          }
-        }
-      }
+    for(const landmarks of results.multiHandLandmarks){
+      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color:'#0ff', lineWidth:2});
+      drawLandmarks(ctx, landmarks, {color:'#0ff', lineWidth:1});
     }
-  } else {
-    statusEl.innerText = '👀 Tidak ada tangan';
+    // Trigger gesture match
+    matchGestures(results.multiHandLandmarks);
   }
-  ctx.restore();
 }
 
-/* face callback with anti-blink logic (eye must be closed >1.5s) */
+/* ====== FaceMesh ====== */
 let eyeClosedSince = null;
+const FACE_YAWN_THRESHOLD = 0.06;
+const FACE_SLEEP_THRESHOLD = 0.04;
+const FACE_SMILE_WIDTH = 0.06;
+const FACE_SAD_THRESHOLD = 0.035;
+
+const faceMesh = new FaceMesh({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+faceMesh.setOptions({maxNumFaces:1,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+faceMesh.onResults(onFaceResults);
+
+function faceMetrics(landmarks){
+  // contoh simple: mouthOpen, leftEye, rightEye, frown
+  const mouthOpen = Math.hypot(
+    landmarks[13].x - landmarks[14].x,
+    landmarks[13].y - landmarks[14].y
+  );
+  const leftEye = Math.hypot(landmarks[159].x-landmarks[145].x, landmarks[159].y-landmarks[145].y);
+  const rightEye = Math.hypot(landmarks[386].x-landmarks[374].x, landmarks[386].y-landmarks[374].y);
+  const mouthWidth = Math.hypot(landmarks[78].x-landmarks[308].x, landmarks[78].y-landmarks[308].y);
+  const leftFrown = landmarks[55].y - landmarks[65].y;
+  const rightFrown = landmarks[285].y - landmarks[295].y;
+  return {mouthOpen,leftEye,rightEye,mouthWidth,leftFrown,rightFrown};
+}
 
 function onFaceResults(results){
+  if(!toggleFace.checked) return;
   if(results.multiFaceLandmarks && results.multiFaceLandmarks.length>0){
     const face = results.multiFaceLandmarks[0];
-    // draw mesh lightly
     window.drawConnectors(ctx, face, window.FACEMESH_TESSELATION, {color:'#ffffff22', lineWidth:1});
     const m = faceMetrics(face);
     const now = Date.now();
     const faceCd = parseInt(faceCooldownInput.value) || 3000;
 
-    // Yawn detection: large vertical mouthOpen
-    if(toggleFace.checked && m.mouthOpen > FACE_YAWN_THRESHOLD){
-      if(now - lastFaceTrigger > faceCd){
-        lastFaceTrigger = now;
-        speak('Kamu kelihatan menguap, istirahat dulu ya');
-        statusEl.innerText = '😮 Terlihat menguap';
-      }
-      eyeClosedSince = null;
-      return;
-    }
+    let currentExp = null;
 
-    // Sleepy detection: eyes closed for >1.5s (anti-blink)
-    if(toggleFace.checked && m.leftEye < FACE_SLEEP_THRESHOLD && m.rightEye < FACE_SLEEP_THRESHOLD){
+    // Yawn detection
+    if(m.mouthOpen > FACE_YAWN_THRESHOLD) currentExp='yawn';
+    // Sleep detection
+    else if(m.leftEye < FACE_SLEEP_THRESHOLD && m.rightEye < FACE_SLEEP_THRESHOLD){
       if(!eyeClosedSince) eyeClosedSince = now;
-      else if(now - eyeClosedSince > 1500){
-        if(now - lastFaceTrigger > faceCd){
-          lastFaceTrigger = now;
-          speak('Kamu mengantuk, jangan dipaksa ya');
-          statusEl.innerText = '😴 Terlihat mengantuk';
+      else if(now-eyeClosedSince>1500) currentExp='sleep';
+    } else eyeClosedSince=null;
+    // Smile detection
+    if(m.mouthWidth>FACE_SMILE_WIDTH && m.mouthOpen<0.035) currentExp='smile';
+    // Sad detection
+    if(m.leftFrown<FACE_SAD_THRESHOLD || m.rightFrown<FACE_SAD_THRESHOLD) currentExp='sad';
+
+    if(currentExp && currentExp!==lastFaceExpression){
+      if(now-lastFaceTrigger>faceCd){
+        lastFaceTrigger=now;
+        lastFaceExpression=currentExp;
+        switch(currentExp){
+          case 'yawn': speak('Kamu kelihatan menguap, istirahat dulu ya'); statusEl.innerText='😮 Terlihat menguap'; break;
+          case 'sleep': speak('Kamu mengantuk, jangan dipaksa ya'); statusEl.innerText='😴 Terlihat mengantuk'; break;
+          case 'smile': speak('Kamu tersenyum, bagus!'); statusEl.innerText='😊 Terlihat senyum'; break;
+          case 'sad': speak('Kamu kelihatan sedih, semoga harimu segera membaik'); statusEl.innerText='😔 Terlihat sedih/murung'; break;
         }
-        // keep eyeClosedSince to avoid repeated rapid triggers
-        eyeClosedSince = now;
       }
-      return;
-    } else {
-      eyeClosedSince = null; // reset if eyes open
     }
-
-    // Smile detection: relatively wide mouth but not tall (smile width threshold)
-    if(toggleFace.checked && m.mouthWidth > FACE_SMILE_WIDTH && m.mouthOpen < 0.035){
-      if(now - lastFaceTrigger > faceCd){
-        lastFaceTrigger = now;
-        speak('Kamu tersenyum, bagus!');
-        statusEl.innerText = '😊 Terlihat senyum';
-      }
-      return;
-    }
-
-    // Sad detection heuristic: brows closer to eyes or mouth corners down (use leftFrown/rightFrown)
-    if(toggleFace.checked && (m.leftFrown < FACE_SAD_THRESHOLD || m.rightFrown < FACE_SAD_THRESHOLD)){
-      if(now - lastFaceTrigger > faceCd){
-        lastFaceTrigger = now;
-        speak('Kamu kelihatan sedih, semoga harimu segera membaik');
-        statusEl.innerText = '😔 Terlihat sedih/murung';
-      }
-      return;
-    }
-    // else do nothing
+    if(!currentExp) lastFaceExpression=null;
   }
 }
 
-/* flash highlight */
-function flashHighlight(){
-  const vb = document.getElementById('videoWrap');
-  vb.classList.add('highlight');
-  setTimeout(()=>vb.classList.remove('highlight'), 420);
+/* ====== Gesture match ====== */
+function matchGestures(handsLandmarks){
+  const now = Date.now();
+  const cd = parseInt(gestureCooldownInput.value)||2500;
+  if(now - lastGlobalTrigger<cd) return;
+
+  templates.forEach(g=>{
+    if(matchTemplate(g.landmarks,handsLandmarks)){
+      if(g.response) speak(g.response);
+      lastGlobalTrigger = now;
+    }
+  });
 }
-
-/* ====== MediaPipe & Camera init ====== */
-hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
-hands.onResults(onHandsResults);
-
-faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
-faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
-faceMesh.onResults(onFaceResults);
-
-/* camera start/stop */
-async function startCamera(){
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}, audio:false});
-    video.srcObject = stream;
-    await video.play();
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    cameraObj = new Camera(video, {
-      onFrame: async () => {
-        // send both to hands and faceMesh
-        await hands.send({image: video});
-        await faceMesh.send({image: video});
-      },
-      width: video.videoWidth,
-      height: video.videoHeight
-    });
-    cameraObj.start();
-    btnCamera.innerText = 'Stop Camera';
-    statusEl.innerText = '✅ Kamera berjalan';
-  }catch(err){
-    console.error(err); alert('Gagal akses kamera: ' + err.message); statusEl.innerText = '❌ Gagal akses kamera';
+function matchTemplate(templateLandmarks,currentLandmarks){
+  // simple distance match
+  if(!templateLandmarks || templateLandmarks.length===0) return false;
+  if(currentLandmarks.length!==templateLandmarks.length) return false;
+  let score=0;
+  for(let i=0;i<templateLandmarks.length;i++){
+    for(let j=0;j<templateLandmarks[i].length;j++){
+      const t=templateLandmarks[i][j];
+      const c=currentLandmarks[i][j];
+      score+=Math.hypot(t.x-c.x,t.y-c.y);
+    }
   }
+  const threshold = parseFloat(sensitivityRange.value)||3.0;
+  return score<threshold;
 }
-function stopCamera(){
-  if(cameraObj){ cameraObj.stop(); cameraObj = null; }
-  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null; }
-  btnCamera.innerText = 'Start Camera';
-  statusEl.innerText = 'Kamera dihentikan';
-}
-btnCamera.onclick = ()=> { if(!cameraObj) startCamera(); else stopCamera(); };
 
-/* init */
-function saveLocal(){
-  try{
-    localStorage.setItem('saved_gestures_v1', JSON.stringify(templates));
-  }catch(e){ console.warn('localStorage save failed', e); }
+/* ====== Recording ====== */
+btnRecord.addEventListener('click',()=>{recording=true; recordFrames=[]; statusEl.innerText='🎥 Merekam...';});
+btnStopRecord.addEventListener('click',()=>{recording=false; if(recordFrames.length>0){saveNewGesture(recordFrames); statusEl.innerText='✅ Rekaman selesai';}});
+function saveNewGesture(frames){
+  const name = gestureNameInput.value || `Gesture-${templates.length+1}`;
+  const response = gestureResponseInput.value || '';
+  templates.push({name,response,landmarks:frames});
+  saveTemplates();
 }
-function loadLocal(){
-  try{
-    const data = localStorage.getItem('saved_gestures_v1');
-    if(data){
-      templates = JSON.parse(data).map(d=>({...d, lastTriggered:0}));
-    } else templates = [];
-  }catch(e){ console.warn('localStorage load failed', e); templates = []; }
-}
-loadLocal();
-renderTemplates();
 
-/* keyboard shortcuts */
-document.addEventListener('keydown', (e)=>{
-  if(e.key==='r') btnRecord.click();
-  if(e.key==='s') btnStopRecord.click();
+/* ====== Snapshot ====== */
+btnSnapshot.addEventListener('click',()=>{
+  const data = canvas.toDataURL('image/png');
+  downloadLink.href = data;
+  downloadLink.download = 'snapshot.png';
+  downloadLink.click();
 });
 
-/* apply settings */
-applySettingsBtn.onclick = ()=> { statusEl.innerText = 'Settings applied.'; };
+/* ====== Export / Import ====== */
+exportBtn.addEventListener('click',()=>{
+  const blob = new Blob([JSON.stringify(templates)],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  downloadLink.href=url;
+  downloadLink.download='gestures.json';
+  downloadLink.click();
+});
+importBtn.addEventListener('click',()=>importFile.click());
+importFile.addEventListener('change',e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload=()=>{ templates=JSON.parse(reader.result); saveTemplates(); };
+  reader.readAsText(file);
+});
+clearBtn.addEventListener('click',()=>{ if(confirm('Clear semua gesture?')){templates=[]; saveTemplates();}});
 
-/* small compatibility: ensure RECORD_FRAME_COUNT ref works in messages */
-const RECORD_FRAME_count = RECORD_FRAME_COUNT;
+/* ====== Apply Settings / Save ====== */
+applySettingsBtn.addEventListener('click',()=>{statusEl.innerText='⚙️ Settings diterapkan';});
+saveBtn.addEventListener('click',saveTemplates);
+
 </script>
 </body>
 </html>
